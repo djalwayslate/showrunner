@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import type { Profile, TabKey, EventRow } from "@/lib/types"
 import EventSwitcher from "./EventSwitcher"
 import EventEditor from "./EventEditor"
+import EventBuilder from "./EventBuilder"
 import BulkImportModal from "./BulkImportModal"
 import HomeTab from "./HomeTab"
 import HospTab from "./HospTab"
@@ -39,6 +40,7 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [editing, setEditing] = useState<EventRow | "new" | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [buildOpen, setBuildOpen] = useState(false)
   const [scope, setScope] = useState<"events" | "hq">("events")
   const [hqTab, setHqTab] = useState<"overview" | "team" | "playbook" | "settings">("overview")
 
@@ -179,6 +181,7 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
             selectedId={selectedEventId}
             onSelect={selectEvent}
             onNew={() => setEditing("new")}
+            onBuild={() => setBuildOpen(true)}
             onEdit={(e) => setEditing(e)}
             onBulkImport={() => setBulkOpen(true)}
             canManage={canManageEvents}
@@ -292,6 +295,13 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
         <BulkImportModal
           onClose={() => setBulkOpen(false)}
           onCreated={(e) => setEventList((prev) => [...prev, e])}
+        />
+      )}
+
+      {buildOpen && (
+        <EventBuilder
+          onCreated={(e) => { onEventSaved(e, true); setBuildOpen(false) }}
+          onClose={() => setBuildOpen(false)}
         />
       )}
     </div>

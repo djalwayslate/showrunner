@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { ChevronDown, Plus, Check, Pencil, DownloadCloud } from "lucide-react"
+import { ChevronDown, Plus, Check, Pencil, DownloadCloud, Wand2 } from "lucide-react"
 import type { EventRow } from "@/lib/types"
 
 export default function EventSwitcher({
@@ -9,6 +9,7 @@ export default function EventSwitcher({
   selectedId,
   onSelect,
   onNew,
+  onBuild,
   onEdit,
   onBulkImport,
   canManage,
@@ -17,6 +18,7 @@ export default function EventSwitcher({
   selectedId: string | null
   onSelect: (id: string) => void
   onNew: () => void
+  onBuild: () => void
   onEdit: (e: EventRow) => void
   onBulkImport: () => void
   canManage: boolean
@@ -93,6 +95,9 @@ export default function EventSwitcher({
 
           {canManage && (
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 4 }}>
+              <button style={s.buildBtn} onClick={() => { onBuild(); setOpen(false) }} type="button">
+                <Wand2 size={15} strokeWidth={2.2} /> Build with AI
+              </button>
               <button style={s.newBtn} onClick={() => { onNew(); setOpen(false) }} type="button">
                 <Plus size={15} strokeWidth={2.2} /> New event
               </button>
@@ -120,6 +125,7 @@ const s: Record<string, React.CSSProperties> = {
   itemName: { fontSize: 13.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   itemMeta: { fontSize: 11.5, color: "var(--muted)" },
   editBtn: { width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  buildBtn: { display: "flex", alignItems: "center", gap: 7, width: "100%", background: "var(--accent)", border: "none", color: "#fff", fontSize: 13, fontWeight: 600, borderRadius: 9, padding: "10px 10px", cursor: "pointer", justifyContent: "center", marginBottom: 4 },
   newBtn: { display: "flex", alignItems: "center", gap: 7, width: "100%", background: "transparent", border: "none", color: "var(--accent)", fontSize: 13, fontWeight: 600, borderRadius: 9, padding: "9px 10px", cursor: "pointer", justifyContent: "center" },
   bulkBtn: { display: "flex", alignItems: "center", gap: 7, width: "100%", background: "transparent", border: "none", color: "var(--text-2)", fontSize: 12.5, fontWeight: 500, borderRadius: 9, padding: "7px 10px", cursor: "pointer", justifyContent: "center" },
 }

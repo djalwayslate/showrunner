@@ -61,6 +61,7 @@ A deployed, multi-tenant-ready event operations app for **Latino Kings**, a bail
 - `marketing` — ad-spend advice / spend-to-earn tips.
 - `rider` — reads an artist **rider PDF or photo**, extracts hospitality + technical requirements.
 - `event-import` — pulls event details from a link. **RA (ra.co) via their public GraphQL API**; generic pages via OG/JSON-LD scrape. (Facebook is blocked by Meta.)
+- `event-build` — a sentence of context → a full event **blueprint** (event details, stages, phased tasks, budget lines, hospitality roster, draft timetable), grounded in Playbook + past events. Powers the autonomous event-builder. Never invents numbers (budget defaults to 0, attendance grounded in history) or artist names (placeholder slots only).
 
 ### Lib (`src/lib/`)
 - `types.ts` — all shared TypeScript types (Profile, EventRow, HospPerson, LineupEntry+RiderItem, BudgetItem+BudgetSubItem, Task, Proposal, PlaybookEntry, Guest, InventoryItem, CrewContact, MarketingSpend, TabKey).
@@ -72,6 +73,7 @@ A deployed, multi-tenant-ready event operations app for **Latino Kings**, a bail
 - `EventSwitcher.tsx` — event dropdown grouped Upcoming / History (date-sorted), New event, Import-from-links, per-event edit.
 - `EventEditor.tsx` — create/edit event modal: name, dates, doors time, attendance, poster, description, ticket/Drive/FB links; "paste a link → autofill"; uses org defaults on create.
 - `BulkImportModal.tsx` — paste many event links → create multiple events.
+- `EventBuilder.tsx` — **autonomous event-builder** modal: a sentence of context → AI blueprint → review step with a per-section include toggle (stages/tasks/budget/hospitality/timetable) → one-tap create. Calls `/api/event-build`; commits via the browser client (event → `hosp_settings` → budget → tasks → hosp roster + days → lineup), mirroring `EventEditor`/`PlannerTab`. Reached from `EventSwitcher`'s "Build with AI".
 - `HomeTab.tsx` — per-event home: hero, status cards, "what needs you" nudges, **master chat with file upload** (calls `/api/brain`, ingests screenshots, proposes & saves rows).
 - `HospTab.tsx` — hospitality roster, day-by-day attendance board, drink/food multipliers; renders `RiderRollup`.
 - `LineupTab.tsx` — **the timetable**: multi-stage × multi-day drag-drop grid, night-aware time sort, music acts + activities, Edit/View toggle, hide-days, "↓ From RA" lineup import, per-act rider button.
@@ -127,13 +129,13 @@ node scripts/run-migration.mjs scripts/<file>.sql   # apply a schema change
 
 ## Current state
 
-**Shipped & live.** Auth, Brand HQ (Overview/Team/Playbook/Settings), full per-event suite (Home+master-chat, Lineup/timetable+activities+riders, Budget+projections, Hosp+rider-rollup, Guests/door list, Logistics/crew+gear, Planner+auto-plan, Pitch, Insights, Marketing, Import), event import from RA, editable org settings. Three real past events seeded into History for forecasting. Every Excel sheet the team used is now covered in-app.
+**Shipped & live.** Auth, Brand HQ (Overview/Team/Playbook/Settings), full per-event suite (Home+master-chat, Lineup/timetable+activities+riders, Budget+projections, Hosp+rider-rollup, Guests/door list, Logistics/crew+gear, Planner+auto-plan, Pitch, Insights, Marketing, Import), event import from RA, editable org settings. Three real past events seeded into History for forecasting. Every Excel sheet the team used is now covered in-app. **Autonomous event-builder** is live — build a fully-scaffolded event (stages, phased tasks, budget, hospitality, draft timetable) from one sentence, review, and commit.
 
 ## What's still to do (roadmap, rough priority)
 
-1. **Autonomous event-builder** — create an event from a sentence of context; AI sets up stages, phased tasks, budget skeleton, hospitality and a draft timetable in one shot.
-2. **Real-time sync** — Supabase realtime so edits appear live for the team (currently fetch-on-load + focus refresh).
-3. **Sponsor & artist portals** — scoped read-only logins (artist sees only their booking + rider; sponsor sees only their deliverables). Roles already exist in the data model.
-4. **Google Drive connect** — OAuth + Drive API to read sheets/files directly.
-5. **Wire Guests into `/api/brain`** so a screenshot of a door list bulk-adds guests (brain currently handles hosp/lineup/budget only).
+1. **Real-time sync** — Supabase realtime so edits appear live for the team (currently fetch-on-load + focus refresh).
+2. **Sponsor & artist portals** — scoped read-only logins (artist sees only their booking + rider; sponsor sees only their deliverables). Roles already exist in the data model.
+3. **Google Drive connect** — OAuth + Drive API to read sheets/files directly.
+4. **Wire Guests into `/api/brain`** so a screenshot of a door list bulk-adds guests (brain currently handles hosp/lineup/budget only).
+5. **Generalize the Hosp board off the hardcoded 13–19 week** — `HospTab` renders a fixed Mon–Sun (days 13–19) and `hosp_person_days.day` stores a day-of-month int, so the board doesn't track each event's real dates. The event-builder maps day-offsets onto this window as a workaround; the fix is to key hospitality days off the event's actual `start_date`/`end_date`.
 6. Housekeeping: `AskTab.tsx` is superseded by HomeTab's chat (candidate for removal); consolidate the historical root `supabase_*.sql` snapshots.
