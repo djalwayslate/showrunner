@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Wine, UtensilsCrossed, Users, Plus, Trash2, Bed } from "lucide-react"
+import { Wine, UtensilsCrossed, Users, Plus, Trash2, Bed, Send, ChevronRight } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
-import type { HospPerson, HospSettings } from "@/lib/types"
+import type { HospPerson, HospSettings, TabKey } from "@/lib/types"
 import RiderRollup from "./RiderRollup"
 
 const DAYS = [
@@ -18,7 +18,7 @@ const DAYS = [
 const ROOM_TYPES = ["Single", "Double", "Room"] as const
 const ROLE_TAGS = ["", "Org", "Crew", "Headliner"] as const
 
-export default function HospTab({ eventId, refreshKey }: { eventId: string; refreshKey: number }) {
+export default function HospTab({ eventId, refreshKey, onGoTo }: { eventId: string; refreshKey: number; onGoTo?: (tab: TabKey) => void }) {
   const [settings, setSettings] = useState<HospSettings | null>(null)
   const [people, setPeople] = useState<HospPerson[]>([])
   const [loading, setLoading] = useState(true)
@@ -95,6 +95,16 @@ export default function HospTab({ eventId, refreshKey }: { eventId: string; refr
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {onGoTo && (
+        <button type="button" onClick={() => onGoTo("advance")} style={s.advanceLink}>
+          <Send size={15} strokeWidth={2} style={{ color: "var(--accent)", flexShrink: 0 }} />
+          <span style={{ flex: 1, textAlign: "left" }}>
+            <span style={s.advanceTitle}>Advance the artists &amp; venue</span>
+            <span style={s.advanceSub}>External fill-in links for contacts, transfers, hotel &amp; tech.</span>
+          </span>
+          <ChevronRight size={16} strokeWidth={2} style={{ color: "var(--accent)" }} />
+        </button>
+      )}
       <RiderRollup eventId={eventId} refreshKey={refreshKey} />
       {/* Day overview */}
       <section style={s.board}>
@@ -274,6 +284,13 @@ const st: Record<string, React.CSSProperties> = {
 }
 
 const s: Record<string, React.CSSProperties> = {
+  advanceLink: {
+    display: "flex", alignItems: "center", gap: 11, width: "100%",
+    background: "var(--accent-tint)", border: "1px solid transparent", borderRadius: 13,
+    padding: "12px 14px", cursor: "pointer",
+  },
+  advanceTitle: { display: "block", fontSize: 13.5, fontWeight: 600, color: "var(--text)" },
+  advanceSub: { display: "block", fontSize: 11.5, color: "var(--text-2)", marginTop: 1 },
   board: {
     display: "grid",
     gridTemplateColumns: "repeat(4, 1fr)",

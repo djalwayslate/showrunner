@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Home, Bed, Mic2, Wallet, RefreshCw, Upload, LogOut, CalendarPlus, ListChecks, FileText, BookOpen, Pencil, Ticket, FolderOpen, ExternalLink, BarChart3, Megaphone, Users, Settings, ChevronLeft, DoorOpen, Boxes } from "lucide-react"
+import { Home, Bed, Mic2, Wallet, RefreshCw, Upload, LogOut, CalendarPlus, ListChecks, FileText, BookOpen, Pencil, Ticket, FolderOpen, ExternalLink, BarChart3, Megaphone, Users, Settings, ChevronLeft, DoorOpen, Boxes, Send } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import type { Profile, TabKey, EventRow } from "@/lib/types"
 import EventSwitcher from "./EventSwitcher"
@@ -19,6 +19,7 @@ import InsightsTab from "./InsightsTab"
 import MarketingTab from "./MarketingTab"
 import GuestsTab from "./GuestsTab"
 import LogisticsTab from "./LogisticsTab"
+import AdvancingTab from "./AdvancingTab"
 import TeamTab from "./TeamTab"
 import SettingsHQ from "./SettingsHQ"
 import GlobalOverview from "./GlobalOverview"
@@ -122,6 +123,7 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
     { key: "hosp", icon: Bed, label: "Hosp" },
     { key: "guests", icon: DoorOpen, label: "Guests" },
     { key: "logistics", icon: Boxes, label: "Logistics" },
+    { key: "advance", icon: Send, label: "Advancing" },
     { key: "planner", icon: ListChecks, label: "Planner" },
     { key: "proposal", icon: FileText, label: "Pitch" },
     { key: "insights", icon: BarChart3, label: "Insights" },
@@ -254,13 +256,14 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
 
             <main key={`${tab}-${eventId}`} style={s.content}>
               {tab === "home" && <HomeTab event={selectedEvent} eventId={eventId} refreshKey={refreshKey} onGoTo={setTab} />}
-              {tab === "hosp" && <HospTab eventId={eventId} refreshKey={refreshKey} />}
+              {tab === "hosp" && <HospTab eventId={eventId} refreshKey={refreshKey} onGoTo={setTab} />}
               {tab === "lineup" && <LineupTab eventId={eventId} refreshKey={refreshKey} />}
               {tab === "budget" && (
                 <BudgetTab eventId={eventId} refreshKey={refreshKey} canEdit={canEditBudget} />
               )}
               {tab === "guests" && <GuestsTab eventId={eventId} refreshKey={refreshKey} />}
               {tab === "logistics" && <LogisticsTab eventId={eventId} refreshKey={refreshKey} />}
+              {tab === "advance" && <AdvancingTab eventId={eventId} refreshKey={refreshKey} />}
               {tab === "planner" && <PlannerTab eventId={eventId} refreshKey={refreshKey} />}
               {tab === "proposal" && <ProposalTab eventId={eventId} />}
               {tab === "insights" && <InsightsTab />}

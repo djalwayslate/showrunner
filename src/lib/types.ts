@@ -164,6 +164,7 @@ export type TabKey =
   | "budget"
   | "guests"
   | "logistics"
+  | "advance"
   | "planner"
   | "proposal"
   | "playbook"
