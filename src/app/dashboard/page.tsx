@@ -16,6 +16,9 @@ export default async function DashboardPage() {
     .eq("id", user.id)
     .single()
 
+  if (!profile) redirect("/auth")
+  if (profile.role === "artist" || profile.role === "sponsor") redirect("/portal")
+
   const { data: events } = await supabase
     .from("events")
     .select("*")

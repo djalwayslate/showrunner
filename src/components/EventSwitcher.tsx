@@ -24,7 +24,9 @@ export default function EventSwitcher({
   canManage: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -33,6 +35,14 @@ export default function EventSwitcher({
     document.addEventListener("mousedown", onClick)
     return () => document.removeEventListener("mousedown", onClick)
   }, [])
+
+  function toggleMenu() {
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect()
+      setMenuPos({ top: r.bottom + 8, left: r.left, width: r.width })
+    }
+    setOpen((o) => !o)
+  }
 
   const selected = events.find((e) => e.id === selectedId)
   const today = new Date().toISOString().slice(0, 10)
@@ -54,14 +64,14 @@ export default function EventSwitcher({
 
   return (
     <div style={{ position: "relative" }} ref={ref}>
-      <button style={s.trigger} onClick={() => setOpen((o) => !o)} type="button">
+      <button ref={triggerRef} style={s.trigger} onClick={toggleMenu} type="button">
         <span style={s.triggerName}>{selected ? selected.name : "Select event"}</span>
         {selected && <span style={s.triggerMeta}>{fmtRange(selected)}</span>}
         <ChevronDown size={15} strokeWidth={2.2} style={{ color: "var(--muted)", marginLeft: 2 }} />
       </button>
 
-      {open && (
-        <div style={s.menu}>
+      {open && menuPos && (
+        <div style={{ ...s.menu, top: menuPos.top, left: menuPos.left, width: menuPos.width }}>
           {events.length === 0 && <div style={s.emptyNote}>No events yet.</div>}
           {[
             { label: "Upcoming", list: upcoming },
@@ -113,17 +123,17 @@ export default function EventSwitcher({
 }
 
 const s: Record<string, React.CSSProperties> = {
-  trigger: { display: "flex", alignItems: "center", gap: 9, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 11, padding: "9px 13px", cursor: "pointer", boxShadow: "var(--shadow-sm)", maxWidth: "100%" },
-  triggerName: { fontFamily: "var(--font-fraunces), serif", fontSize: 15, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap" },
-  triggerMeta: { fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", paddingLeft: 9, borderLeft: "1px solid var(--border)" },
-  menu: { position: "absolute", top: "calc(100% + 8px)", left: 0, minWidth: 320, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: 7, zIndex: 50, boxShadow: "var(--shadow-lg)", animation: "lk-fade-up 0.16s ease both" },
+  trigger: { display: "flex", alignItems: "center", gap: 9, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 11, padding: "9px 13px", cursor: "pointer", boxShadow: "var(--shadow-sm)", width: "100%", minWidth: 0, overflow: "hidden" },
+  triggerName: { fontFamily: "var(--font-fraunces), serif", fontSize: 15, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 },
+  triggerMeta: { fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", paddingLeft: 9, borderLeft: "1px solid var(--border)", flexShrink: 0 },
+  menu: { position: "fixed", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14, padding: 7, zIndex: 500, boxShadow: "var(--shadow-lg)", animation: "lk-fade-up 0.16s ease both" },
   menuLabel: { fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", padding: "6px 8px 8px" },
   emptyNote: { fontSize: 12.5, color: "var(--muted)", padding: "8px", textAlign: "center" },
   item: { display: "flex", alignItems: "center", gap: 6, borderRadius: 9, padding: "2px 6px 2px 0" },
   itemActive: { background: "var(--inset)" },
   itemMain: { display: "flex", alignItems: "center", flex: 1, background: "transparent", border: "none", borderRadius: 9, padding: "9px 10px", cursor: "pointer", minWidth: 0 },
   itemName: { fontSize: 13.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  itemMeta: { fontSize: 11.5, color: "var(--muted)" },
+  itemMeta: { fontSize: 11.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   editBtn: { width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   buildBtn: { display: "flex", alignItems: "center", gap: 7, width: "100%", background: "var(--accent)", border: "none", color: "#fff", fontSize: 13, fontWeight: 600, borderRadius: 9, padding: "10px 10px", cursor: "pointer", justifyContent: "center", marginBottom: 4 },
   newBtn: { display: "flex", alignItems: "center", gap: 7, width: "100%", background: "transparent", border: "none", color: "var(--accent)", fontSize: 13, fontWeight: 600, borderRadius: 9, padding: "9px 10px", cursor: "pointer", justifyContent: "center" },

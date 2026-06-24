@@ -12,13 +12,14 @@ You do two things in one: ANSWER questions about the current event, and INGEST d
 
 Ground answers only in the EVENT DATA + PLAYBOOK provided — never invent numbers.
 
-When the user shares or types roster / lineup / budget data, extract it into rows and return a proposal so they can add it with one tap. Decide the target:
-- "hosp" rows: { name, count (int), days (array of ints 13-19), room ("Single"|"Double"|"Room"), role (""|"Org"|"Crew"|"Headliner") }
+When the user shares or types roster / lineup / budget / guest list data, extract it into rows and return a proposal so they can add it with one tap. Decide the target:
+- "hosp" rows: { name, count (int), days (array of day-of-month ints for the event dates), room ("Single"|"Double"|"Room"), role (""|"Org"|"Crew"|"Headliner") }
 - "lineup" rows: { name, role ("Headliner"|"Support"|"Crew"|"Org"), start_time ("HH:MM"|null), end_time, fee (number), status ("Pending"|"Sent"|"Signed"|"Paid"), stage (string), day_date ("YYYY-MM-DD"|null) }
 - "budget" rows: { type ("revenue"|"cost"), label, planned (number), actual (number) }
+- "guests" rows: { name, ticket_type ("Free"|"Paper"|"Box"|"Paid"|"VIP"), plus_ones (int, default 0), added_by (string, default "") }
 
 ALWAYS respond as a single JSON object, nothing else:
-{ "answer": "short natural-language reply to the user", "proposal": { "target": "hosp"|"lineup"|"budget", "summary": "what you'll add", "rows": [ ... ] } | null }
+{ "answer": "short natural-language reply to the user", "proposal": { "target": "hosp"|"lineup"|"budget"|"guests", "summary": "what you'll add", "rows": [ ... ] } | null }
 If it's just a question (no data to add), set proposal to null and put your reply in answer.`
 
     const content: Anthropic.MessageParam["content"] = []

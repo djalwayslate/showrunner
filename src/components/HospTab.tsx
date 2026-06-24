@@ -3,22 +3,31 @@
 import { useState, useEffect } from "react"
 import { Wine, UtensilsCrossed, Users, Plus, Trash2, Bed, Send, ChevronRight } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
-import type { HospPerson, HospSettings, TabKey } from "@/lib/types"
+import type { EventRow, HospPerson, HospSettings, TabKey } from "@/lib/types"
 import RiderRollup from "./RiderRollup"
 
-const DAYS = [
-  { d: 13, label: "Mon" },
-  { d: 14, label: "Tue" },
-  { d: 15, label: "Wed" },
-  { d: 16, label: "Thu" },
-  { d: 17, label: "Fri" },
-  { d: 18, label: "Sat" },
-  { d: 19, label: "Sun" },
-]
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+function buildDays(start_date: string, end_date: string) {
+  const start = new Date(start_date + "T00:00:00")
+  const end = new Date(end_date + "T00:00:00")
+  const days: { d: number; label: string; dateStr: string }[] = []
+  const cur = new Date(start)
+  while (cur <= end) {
+    days.push({
+      d: cur.getDate(),
+      label: DAY_LABELS[cur.getDay()],
+      dateStr: `${String(cur.getDate()).padStart(2, "0")}.${String(cur.getMonth() + 1).padStart(2, "0")}`,
+    })
+    cur.setDate(cur.getDate() + 1)
+  }
+  return days
+}
 const ROOM_TYPES = ["Single", "Double", "Room"] as const
 const ROLE_TAGS = ["", "Org", "Crew", "Headliner"] as const
 
-export default function HospTab({ eventId, refreshKey, onGoTo }: { eventId: string; refreshKey: number; onGoTo?: (tab: TabKey) => void }) {
+export default function HospTab({ event, eventId, refreshKey, onGoTo }: { event: EventRow; eventId: string; refreshKey: number; onGoTo?: (tab: TabKey) => void }) {
+  const DAYS = buildDays(event.start_date, event.end_date)
   const [settings, setSettings] = useState<HospSettings | null>(null)
   const [people, setPeople] = useState<HospPerson[]>([])
   const [loading, setLoading] = useState(true)
@@ -26,15 +35,18 @@ export default function HospTab({ eventId, refreshKey, onGoTo }: { eventId: stri
 
   async function load() {
     setLoading(true)
-    const [{ data: st }, { data: rawPeople }, { data: days }] = await Promise.all([
+    const [{ data: st }, { data: rawPeople }] = await Promise.all([
       db.from("hosp_settings").select("*").eq("event_id", eventId).single(),
       db.from("hosp_people").select("*").eq("event_id", eventId).order("sort_order"),
-      db.from("hosp_person_days").select("person_id, day"),
     ])
     if (st) setSettings(st)
-    if (rawPeople && days) {
+    if (rawPeople) {
+      const personIds = rawPeople.map((p) => p.id)
+      const { data: days } = personIds.length > 0
+        ? await db.from("hosp_person_days").select("person_id, day").in("person_id", personIds)
+        : { data: [] as { person_id: string; day: number }[] }
       const dayMap: Record<string, number[]> = {}
-      days.forEach((r) => {
+      ;(days ?? []).forEach((r) => {
         if (!dayMap[r.person_id]) dayMap[r.person_id] = []
         dayMap[r.person_id].push(r.day)
       })
@@ -89,7 +101,7 @@ export default function HospTab({ eventId, refreshKey, onGoTo }: { eventId: stri
   const totalHeadcountDays = Object.values(stats).reduce((a, b) => a + b, 0)
   const drinks = Number(settings?.drinks_per_person || 0)
   const food = Number(settings?.food_per_person || 0)
-  const peakDay = DAYS.reduce((mx, day) => (stats[day.d] > stats[mx.d] ? day : mx), DAYS[0])
+  const peakDay = DAYS.length > 0 ? DAYS.reduce((mx, day) => (stats[day.d] > stats[mx.d] ? day : mx), DAYS[0]) : null
 
   if (loading) return <Skeleton />
 
@@ -108,14 +120,14 @@ export default function HospTab({ eventId, refreshKey, onGoTo }: { eventId: stri
       <RiderRollup eventId={eventId} refreshKey={refreshKey} />
       {/* Day overview */}
       <section style={s.board}>
-        {DAYS.map(({ d, label }) => {
+        {DAYS.map(({ d, label, dateStr }) => {
           const pax = stats[d]
-          const isPeak = pax > 0 && d === peakDay.d
+          const isPeak = pax > 0 && peakDay !== null && d === peakDay.d
           return (
             <div key={d} style={{ ...s.day, ...(isPeak ? s.dayPeak : {}) }}>
               <div style={s.dayHead}>
                 <span style={s.dayLabel}>{label}</span>
-                <span style={s.dayDate}>{String(d).padStart(2, "0")}.07</span>
+                <span style={s.dayDate}>{dateStr}</span>
               </div>
               <div style={s.payRow}>
                 <span style={{ ...s.pax, color: pax > 0 ? "var(--text)" : "var(--muted)" }} className="tnum">{pax}</span>
@@ -183,16 +195,28 @@ export default function HospTab({ eventId, refreshKey, onGoTo }: { eventId: stri
                   />
                   <div style={s.cardControls}>
                     <Stepper value={Number(p.count)} min={1} onChange={(v) => updatePerson(p.id, { count: v })} compact />
-                    <select style={s.select} value={p.room} onChange={(e) => updatePerson(p.id, { room: e.target.value as HospPerson["room"] })}>
-                      {ROOM_TYPES.map((r) => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                    <select
-                      style={{ ...s.select, ...(p.role ? s.selectRole : {}) }}
-                      value={p.role}
-                      onChange={(e) => updatePerson(p.id, { role: e.target.value as HospPerson["role"] })}
+                    <button
+                      style={s.chip}
+                      onClick={() => {
+                        const idx = ROOM_TYPES.indexOf(p.room)
+                        updatePerson(p.id, { room: ROOM_TYPES[(idx + 1) % ROOM_TYPES.length] })
+                      }}
+                      type="button"
                     >
-                      {ROLE_TAGS.map((r) => <option key={r} value={r}>{r || "Guest"}</option>)}
-                    </select>
+                      {p.room}
+                    </button>
+                    <button
+                      style={{ ...s.chip, ...(p.role ? s.chipRole : {}) }}
+                      onClick={() => {
+                        const roles = ROLE_TAGS.filter((r): r is Exclude<typeof r, ""> => r !== "")
+                        const idx = roles.indexOf(p.role as typeof roles[number])
+                        const next = idx === -1 ? roles[0] : idx === roles.length - 1 ? "" : roles[idx + 1]
+                        updatePerson(p.id, { role: next as HospPerson["role"] })
+                      }}
+                      type="button"
+                    >
+                      {p.role || "Guest"}
+                    </button>
                     <button style={s.trashBtn} onClick={() => removePerson(p.id)} title="Remove" type="button">
                       <Trash2 size={15} strokeWidth={2} />
                     </button>
@@ -382,18 +406,18 @@ const s: Record<string, React.CSSProperties> = {
     outline: "none",
   },
   cardControls: { display: "flex", alignItems: "center", gap: 8 },
-  select: {
+  chip: {
     background: "var(--inset)",
     border: "1px solid var(--border)",
     borderRadius: 8,
     color: "var(--text-2)",
     fontSize: 12.5,
     fontWeight: 500,
-    padding: "7px 8px",
+    padding: "7px 10px",
     cursor: "pointer",
-    outline: "none",
+    transition: "all 0.12s",
   },
-  selectRole: { color: "var(--accent)", background: "var(--accent-tint)", borderColor: "transparent" },
+  chipRole: { color: "var(--accent)", background: "var(--accent-tint)", borderColor: "transparent" },
   trashBtn: {
     width: 32,
     height: 32,

@@ -5,7 +5,7 @@ import { ArrowUp, Loader, Sparkles, ListChecks, Mic2, Wallet, Bed, AlertCircle, 
 import { createClient } from "@/lib/supabase/client"
 import type { EventRow, TabKey } from "@/lib/types"
 
-type Proposal = { target: "hosp" | "lineup" | "budget"; summary?: string; rows: Record<string, unknown>[] }
+type Proposal = { target: "hosp" | "lineup" | "budget" | "guests"; summary?: string; rows: Record<string, unknown>[] }
 type Msg = { role: "user" | "assistant"; content: string; proposal?: Proposal | null; saved?: boolean }
 type Attachment = { name: string; image?: string; imageMime?: string; fileText?: string }
 
@@ -50,6 +50,11 @@ export default function HomeTab({
           event_id: eventId, name: r.name ?? "Act", role: r.role ?? "Support",
           start_time: r.start_time ?? null, end_time: r.end_time ?? null, fee: Number(r.fee) || 0,
           status: r.status ?? "Pending", stage: r.stage ?? "", day_date: r.day_date ?? null, sort_order: 999 + j,
+        })))
+      } else if (p.target === "guests") {
+        await db.from("guests").insert(p.rows.map((r, j) => ({
+          event_id: eventId, name: r.name ?? "New guest", ticket_type: r.ticket_type ?? "Paper",
+          plus_ones: Number(r.plus_ones) || 0, added_by: r.added_by ?? "", status: "Accepted", attended: false, sort_order: 999 + j,
         })))
       } else {
         await db.from("budget_items").insert(p.rows.map((r, j) => ({
@@ -218,7 +223,7 @@ export default function HomeTab({
                       <span style={s.savedTag}><Check size={13} strokeWidth={2.4} /> Added</span>
                     ) : (
                       <button style={s.proposalBtn} onClick={() => saveProposal(i, m.proposal!)} type="button">
-                        Add {m.proposal.rows.length} to {m.proposal.target === "hosp" ? "Hosp" : m.proposal.target === "lineup" ? "Lineup" : "Budget"}
+                        Add {m.proposal.rows.length} to {m.proposal.target === "hosp" ? "Hosp" : m.proposal.target === "lineup" ? "Lineup" : m.proposal.target === "guests" ? "Guests" : "Budget"}
                       </button>
                     )}
                   </div>

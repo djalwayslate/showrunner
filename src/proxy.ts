@@ -27,13 +27,14 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!user && request.nextUrl.pathname.startsWith("/dashboard")) {
+  const path = request.nextUrl.pathname
+  if (!user && (path.startsWith("/dashboard") || path.startsWith("/portal"))) {
     const url = request.nextUrl.clone()
     url.pathname = "/auth"
     return NextResponse.redirect(url)
   }
 
-  if (user && request.nextUrl.pathname === "/auth") {
+  if (user && path === "/auth") {
     const url = request.nextUrl.clone()
     url.pathname = "/dashboard"
     return NextResponse.redirect(url)
@@ -43,5 +44,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/auth"],
+  matcher: ["/dashboard/:path*", "/portal/:path*", "/auth"],
 }

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Home, Bed, Mic2, Wallet, RefreshCw, Upload, LogOut, CalendarPlus, ListChecks, FileText, BookOpen, Pencil, Ticket, FolderOpen, ExternalLink, BarChart3, Megaphone, Users, Settings, ChevronLeft, DoorOpen, Boxes, Send } from "lucide-react"
+import { Home, Bed, Mic2, Wallet, RefreshCw, Upload, LogOut, CalendarPlus, ListChecks, FileText, BookOpen, Pencil, Ticket, FolderOpen, ExternalLink, BarChart3, Megaphone, Users, Settings, DoorOpen, Boxes, Send } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import type { Profile, TabKey, EventRow } from "@/lib/types"
 import EventSwitcher from "./EventSwitcher"
@@ -24,6 +24,48 @@ import TeamTab from "./TeamTab"
 import SettingsHQ from "./SettingsHQ"
 import GlobalOverview from "./GlobalOverview"
 import ImportTab from "./ImportTab"
+
+const NAV_GROUPS: { label?: string; items: { key: TabKey; icon: React.ElementType; label: string }[] }[] = [
+  { items: [{ key: "home", icon: Home, label: "Home" }] },
+  {
+    label: "People",
+    items: [
+      { key: "lineup", icon: Mic2, label: "Lineup" },
+      { key: "hosp", icon: Bed, label: "Hospitality" },
+      { key: "guests", icon: DoorOpen, label: "Guests" },
+    ],
+  },
+  {
+    label: "Finance",
+    items: [
+      { key: "budget", icon: Wallet, label: "Budget" },
+      { key: "marketing", icon: Megaphone, label: "Marketing" },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { key: "logistics", icon: Boxes, label: "Logistics" },
+      { key: "advance", icon: Send, label: "Advancing" },
+      { key: "planner", icon: ListChecks, label: "Planner" },
+    ],
+  },
+  {
+    label: "Growth",
+    items: [
+      { key: "proposal", icon: FileText, label: "Pitch" },
+      { key: "insights", icon: BarChart3, label: "Insights" },
+      { key: "import", icon: Upload, label: "Import" },
+    ],
+  },
+]
+
+const HQ_TABS: { key: "overview" | "team" | "playbook" | "settings"; icon: React.ElementType; label: string }[] = [
+  { key: "overview", icon: Home, label: "Overview" },
+  { key: "team", icon: Users, label: "Team" },
+  { key: "playbook", icon: BookOpen, label: "Playbook" },
+  { key: "settings", icon: Settings, label: "Settings" },
+]
 
 type Props = {
   profile: Profile | null
@@ -106,6 +148,18 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
   const selectedEvent = eventList.find((e) => e.id === selectedEventId) ?? null
   const eventId = selectedEvent?.id ?? ""
 
+  useEffect(() => {
+    if (!eventId) return
+    const supabase = createClient()
+    const tables = ["hosp_people", "lineup_entries", "budget_items", "tasks", "guests", "inventory_items", "crew_contacts", "marketing_spend"]
+    const ch = supabase.channel(`lk-${eventId}`)
+    tables.forEach((table) => {
+      ch.on("postgres_changes" as Parameters<typeof ch.on>[0], { event: "*", schema: "public", table, filter: `event_id=eq.${eventId}` }, () => refresh())
+    })
+    ch.subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [eventId, refresh])
+
   let countdown: { label: string; tone: "soon" | "live" | "done" } | null = null
   if (selectedEvent) {
     const start = new Date(selectedEvent.start_date + "T00:00:00")
@@ -116,151 +170,144 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
     else countdown = { label: `${daysOut} ${daysOut === 1 ? "day" : "days"} out`, tone: "soon" }
   }
 
-  const tabs: { key: TabKey; icon: React.ElementType; label: string }[] = [
-    { key: "home", icon: Home, label: "Home" },
-    { key: "lineup", icon: Mic2, label: "Lineup" },
-    { key: "budget", icon: Wallet, label: "Budget" },
-    { key: "hosp", icon: Bed, label: "Hosp" },
-    { key: "guests", icon: DoorOpen, label: "Guests" },
-    { key: "logistics", icon: Boxes, label: "Logistics" },
-    { key: "advance", icon: Send, label: "Advancing" },
-    { key: "planner", icon: ListChecks, label: "Planner" },
-    { key: "proposal", icon: FileText, label: "Pitch" },
-    { key: "insights", icon: BarChart3, label: "Insights" },
-    { key: "marketing", icon: Megaphone, label: "Marketing" },
-    { key: "import", icon: Upload, label: "Import" },
-  ]
-
   const initial = userEmail.charAt(0).toUpperCase()
 
   return (
     <div style={s.page}>
-      <div style={s.shell}>
-        {/* Top bar */}
-        <header style={s.topbar}>
-          <button style={s.brandWrap} onClick={() => setScope("hq")} title="Brand HQ" type="button">
+      {/* Sidebar */}
+      <aside style={s.sidebar}>
+        <div style={s.sideTop}>
+          <button style={s.brandBtn} onClick={() => setScope(scope === "hq" ? "events" : "hq")} type="button">
             <div style={s.mark}>{brandName.slice(0, 2).toUpperCase()}</div>
             <div style={{ textAlign: "left" }}>
               <div style={s.brand}>{brandName}</div>
               <div style={s.brandSub}>{scope === "hq" ? "Brand HQ" : "Operations"}</div>
             </div>
           </button>
-          <div style={s.topActions}>
-            <button
-              style={s.iconBtn}
-              onClick={refresh}
-              title="Refresh data"
-            >
-              <RefreshCw
-                size={15}
-                strokeWidth={2}
-                style={refreshing ? { animation: "lk-spin 0.6s linear infinite" } : {}}
-              />
-            </button>
-            <button style={s.iconBtn} onClick={signOut} title={`Sign out (${userEmail})`}>
-              <LogOut size={15} strokeWidth={2} />
-            </button>
-            <div style={s.avatar} title={`${userEmail} · ${role}`}>{initial}</div>
-          </div>
-        </header>
 
-        {scope === "hq" ? (
-          <HqView
-            role={role}
-            userId={profile?.id ?? ""}
-            hqTab={hqTab}
-            setHqTab={setHqTab}
-            onBack={() => setScope("events")}
-            onOpenEvent={(id) => { selectEvent(id); setScope("events"); setTab("home") }}
-            refreshKey={refreshKey}
-          />
-        ) : (
-        <>
-        {/* Event row */}
-        <div style={s.eventRow}>
-          <EventSwitcher
-            events={eventList}
-            selectedId={selectedEventId}
-            onSelect={selectEvent}
-            onNew={() => setEditing("new")}
-            onBuild={() => setBuildOpen(true)}
-            onEdit={(e) => setEditing(e)}
-            onBulkImport={() => setBulkOpen(true)}
-            canManage={canManageEvents}
-          />
-          {selectedEvent && countdown && (
-            <div style={{ ...s.countdown, ...countdownTone(countdown.tone) }}>
-              <span style={{ ...s.dot, background: countdownDot(countdown.tone) }} />
-              {countdown.label}
+          {scope !== "hq" && (
+            <div style={s.sideEvent}>
+              <EventSwitcher
+                events={eventList}
+                selectedId={selectedEventId}
+                onSelect={selectEvent}
+                onNew={() => setEditing("new")}
+                onBuild={() => setBuildOpen(true)}
+                onEdit={(e) => setEditing(e)}
+                onBulkImport={() => setBulkOpen(true)}
+                canManage={canManageEvents}
+              />
+              {selectedEvent && countdown && (
+                <div style={{ ...s.countdown, ...countdownTone(countdown.tone) }}>
+                  <span style={{ ...s.dot, background: countdownDot(countdown.tone) }} />
+                  {countdown.label}
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Event info bar */}
-        {selectedEvent && (
-          <div style={s.infoBar}>
-            {selectedEvent.poster_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={selectedEvent.poster_url} alt="" style={s.posterThumb} onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} />
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {selectedEvent.venue && <div style={s.infoVenue}>{selectedEvent.venue}</div>}
-              {selectedEvent.description && <div style={s.infoDesc}>{selectedEvent.description}</div>}
-              <div style={s.linkRow}>
-                {selectedEvent.ticket_url && <LinkChip href={selectedEvent.ticket_url} icon={Ticket}>Tickets</LinkChip>}
-                {selectedEvent.drive_url && <LinkChip href={selectedEvent.drive_url} icon={FolderOpen}>Drive</LinkChip>}
-                {selectedEvent.fb_url && <LinkChip href={selectedEvent.fb_url} icon={ExternalLink}>Facebook</LinkChip>}
-              </div>
-            </div>
-            {canManageEvents && (
-              <button style={s.editEventBtn} onClick={() => setEditing(selectedEvent)} type="button">
-                <Pencil size={13} strokeWidth={2} /> Edit
-              </button>
-            )}
-          </div>
-        )}
+        <nav style={s.sideNav}>
+          {scope === "hq"
+            ? HQ_TABS.filter((t) => t.key !== "team" || role === "admin").map(({ key, icon: Icon, label }) => (
+                <button
+                  key={key}
+                  style={{ ...s.navItem, ...(hqTab === key ? s.navItemOn : {}) }}
+                  onClick={() => setHqTab(key)}
+                  type="button"
+                >
+                  <Icon size={16} strokeWidth={2} />
+                  <span>{label}</span>
+                </button>
+              ))
+            : NAV_GROUPS.map((group) => (
+                <div key={group.label ?? "_"} style={s.navGroup}>
+                  {group.label && <div style={s.navGroupLabel}>{group.label}</div>}
+                  {group.items.map(({ key, icon: Icon, label }) => (
+                    <button
+                      key={key}
+                      style={{ ...s.navItem, ...(tab === key ? s.navItemOn : {}) }}
+                      onClick={() => setTab(key)}
+                      type="button"
+                    >
+                      <Icon size={16} strokeWidth={2} />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+        </nav>
 
-        {!selectedEvent ? (
-          <div style={s.empty}>
-            <div style={s.emptyIcon}>
-              <CalendarPlus size={24} strokeWidth={1.6} />
+        <div style={s.sideBottom}>
+          <div style={s.sideUser}>
+            <div style={s.avatar}>{initial}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={s.userEmail}>{userEmail}</div>
+              <span style={s.roleBadge}>{role}</span>
             </div>
+          </div>
+          <div style={s.sideActions}>
+            <button style={s.iconBtn} onClick={refresh} title="Refresh" type="button">
+              <RefreshCw size={14} strokeWidth={2} style={refreshing ? { animation: "lk-spin 0.6s linear infinite" } : {}} />
+            </button>
+            <button style={s.iconBtn} onClick={signOut} title="Sign out" type="button">
+              <LogOut size={14} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div style={s.main}>
+        {scope === "hq" ? (
+          <main style={s.content}>
+            {hqTab === "overview" && <GlobalOverview onOpenEvent={(id) => { selectEvent(id); setScope("events"); setTab("home") }} />}
+            {hqTab === "team" && role === "admin" && <TeamTab currentUserId={profile?.id ?? ""} isAdmin={true} />}
+            {hqTab === "playbook" && <PlaybookTab eventId="" refreshKey={refreshKey} />}
+            {hqTab === "settings" && <SettingsHQ isAdmin={role === "admin"} />}
+          </main>
+        ) : !selectedEvent ? (
+          <div style={s.empty}>
+            <div style={s.emptyIcon}><CalendarPlus size={24} strokeWidth={1.6} /></div>
             <div style={s.emptyTitle}>No event selected</div>
             <div style={s.emptySub}>
               {eventList.length === 0
                 ? canManageEvents
-                  ? "Create your first event from the selector above to start planning."
-                  : "No events exist yet. Ask an admin to create one."
-                : "Choose an event above to start planning."}
+                  ? "Create your first event from the sidebar to start planning."
+                  : "No events yet. Ask an admin to create one."
+                : "Choose an event from the sidebar to start planning."}
             </div>
           </div>
         ) : (
           <>
-            {/* Segmented tabs */}
-            <nav style={s.tabs}>
-              {tabs.map(({ key, icon: Icon, label }) => {
-                const active = tab === key
-                return (
-                  <button
-                    key={key}
-                    style={{ ...s.tab, ...(active ? s.tabOn : {}) }}
-                    onClick={() => setTab(key)}
-                    type="button"
-                  >
-                    <Icon size={15} strokeWidth={2} style={{ opacity: active ? 1 : 0.7 }} />
-                    <span>{label}</span>
-                  </button>
-                )
-              })}
-            </nav>
+            <div style={s.eventHeader}>
+              <div style={s.eventHeaderMain}>
+                {selectedEvent.poster_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={selectedEvent.poster_url} alt="" style={s.posterThumb} onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} />
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={s.eventName}>{selectedEvent.name}</div>
+                  {selectedEvent.venue && <div style={s.eventVenue}>{selectedEvent.venue}</div>}
+                  <div style={s.linkRow}>
+                    {selectedEvent.ticket_url && <LinkChip href={selectedEvent.ticket_url} icon={Ticket}>Tickets</LinkChip>}
+                    {selectedEvent.drive_url && <LinkChip href={selectedEvent.drive_url} icon={FolderOpen}>Drive</LinkChip>}
+                    {selectedEvent.fb_url && <LinkChip href={selectedEvent.fb_url} icon={ExternalLink}>Facebook</LinkChip>}
+                  </div>
+                </div>
+              </div>
+              {canManageEvents && (
+                <button style={s.editEventBtn} onClick={() => setEditing(selectedEvent)} type="button">
+                  <Pencil size={13} strokeWidth={2} /> Edit
+                </button>
+              )}
+            </div>
 
             <main key={`${tab}-${eventId}`} style={s.content}>
               {tab === "home" && <HomeTab event={selectedEvent} eventId={eventId} refreshKey={refreshKey} onGoTo={setTab} />}
-              {tab === "hosp" && <HospTab eventId={eventId} refreshKey={refreshKey} onGoTo={setTab} />}
+              {tab === "hosp" && <HospTab event={selectedEvent} eventId={eventId} refreshKey={refreshKey} onGoTo={setTab} />}
               {tab === "lineup" && <LineupTab eventId={eventId} refreshKey={refreshKey} />}
-              {tab === "budget" && (
-                <BudgetTab eventId={eventId} refreshKey={refreshKey} canEdit={canEditBudget} />
-              )}
+              {tab === "budget" && <BudgetTab eventId={eventId} refreshKey={refreshKey} canEdit={canEditBudget} />}
               {tab === "guests" && <GuestsTab eventId={eventId} refreshKey={refreshKey} />}
               {tab === "logistics" && <LogisticsTab eventId={eventId} refreshKey={refreshKey} />}
               {tab === "advance" && <AdvancingTab eventId={eventId} refreshKey={refreshKey} />}
@@ -272,16 +319,6 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
             </main>
           </>
         )}
-        </>
-        )}
-
-        <footer style={s.footer}>
-          <span>
-            Signed in as <strong style={{ color: "var(--text-2)", fontWeight: 600 }}>{userEmail}</strong>
-          </span>
-          <span style={s.roleBadge}>{role}</span>
-          {role !== "admin" && <span style={{ color: "var(--muted)" }}>Budget is read-only</span>}
-        </footer>
       </div>
 
       {editing && (
@@ -293,14 +330,12 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
           onClose={() => setEditing(null)}
         />
       )}
-
       {bulkOpen && (
         <BulkImportModal
           onClose={() => setBulkOpen(false)}
           onCreated={(e) => setEventList((prev) => [...prev, e])}
         />
       )}
-
       {buildOpen && (
         <EventBuilder
           onCreated={(e) => { onEventSaved(e, true); setBuildOpen(false) }}
@@ -308,50 +343,6 @@ export default function Dashboard({ profile, events, userEmail, brandName = "Lat
         />
       )}
     </div>
-  )
-}
-
-function HqView({
-  role, userId, hqTab, setHqTab, onBack, onOpenEvent, refreshKey,
-}: {
-  role: string
-  userId: string
-  hqTab: "overview" | "team" | "playbook" | "settings"
-  setHqTab: (t: "overview" | "team" | "playbook" | "settings") => void
-  onBack: () => void
-  onOpenEvent: (id: string) => void
-  refreshKey: number
-}) {
-  const isAdmin = role === "admin"
-  const hqTabs: { key: "overview" | "team" | "playbook" | "settings"; icon: React.ElementType; label: string }[] = [
-    { key: "overview", icon: Home, label: "Overview" },
-    ...(isAdmin ? [{ key: "team" as const, icon: Users, label: "Team" }] : []),
-    { key: "playbook" as const, icon: BookOpen, label: "Playbook" },
-    { key: "settings" as const, icon: Settings, label: "Settings" },
-  ]
-  const active = !isAdmin && hqTab === "team" ? "overview" : hqTab
-
-  return (
-    <>
-      <div style={s.hqHead}>
-        <button style={s.backBtn} onClick={onBack} type="button"><ChevronLeft size={16} strokeWidth={2.2} /> Events</button>
-        <span style={s.hqTitle}>Brand HQ</span>
-      </div>
-      <nav style={s.tabs}>
-        {hqTabs.map(({ key, icon: Icon, label }) => (
-          <button key={key} style={{ ...s.tab, ...(active === key ? s.tabOn : {}) }} onClick={() => setHqTab(key)} type="button">
-            <Icon size={15} strokeWidth={2} style={{ opacity: active === key ? 1 : 0.7 }} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
-      <main key={active} style={s.content}>
-        {active === "overview" && <GlobalOverview onOpenEvent={onOpenEvent} />}
-        {active === "team" && isAdmin && <TeamTab currentUserId={userId} isAdmin={isAdmin} />}
-        {active === "playbook" && <PlaybookTab eventId="" refreshKey={refreshKey} />}
-        {active === "settings" && <SettingsHQ isAdmin={isAdmin} />}
-      </main>
-    </>
   )
 }
 
@@ -377,28 +368,52 @@ function countdownDot(tone: "soon" | "live" | "done"): string {
 
 const s: Record<string, React.CSSProperties> = {
   page: {
+    display: "flex",
     minHeight: "100vh",
     background: "var(--bg)",
   },
-  shell: {
-    maxWidth: 880,
-    margin: "0 auto",
-    padding: "22px 22px 56px",
-  },
-  topbar: {
+  sidebar: {
+    width: 220,
+    flexShrink: 0,
+    height: "100vh",
+    position: "sticky",
+    top: 0,
+    background: "var(--bg-2)",
+    borderRight: "1px solid var(--border)",
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 22,
+    flexDirection: "column",
+    padding: "18px 10px",
+    overflowY: "auto",
   },
-  brandWrap: { display: "flex", alignItems: "center", gap: 11, background: "transparent", border: "none", padding: 0, cursor: "pointer" },
-  hqHead: { display: "flex", alignItems: "center", gap: 10, marginBottom: 18 },
-  backBtn: { display: "flex", alignItems: "center", gap: 4, background: "var(--card)", border: "1px solid var(--border)", color: "var(--text-2)", fontSize: 13, fontWeight: 600, borderRadius: 9, padding: "7px 12px 7px 8px", cursor: "pointer", boxShadow: "var(--shadow-sm)" },
-  hqTitle: { fontFamily: "var(--font-fraunces), serif", fontSize: 20, fontWeight: 600, color: "var(--text)" },
-  mark: {
-    width: 36,
-    height: 36,
+  sideTop: {
+    marginBottom: 4,
+  },
+  brandBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "transparent",
+    border: "none",
+    padding: "6px 8px",
     borderRadius: 10,
+    cursor: "pointer",
+    width: "100%",
+    marginBottom: 14,
+    transition: "background 0.15s",
+    textAlign: "left",
+  },
+  sideEvent: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    paddingBottom: 14,
+    borderBottom: "1px solid var(--border)",
+    marginBottom: 6,
+  },
+  mark: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
     background: "var(--accent)",
     color: "#fff",
     display: "flex",
@@ -406,82 +421,174 @@ const s: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     fontFamily: "var(--font-fraunces), serif",
     fontWeight: 600,
-    fontSize: 15,
+    fontSize: 13,
+    flexShrink: 0,
   },
   brand: {
     fontFamily: "var(--font-fraunces), serif",
-    fontSize: 16.5,
+    fontSize: 14,
     fontWeight: 600,
     color: "var(--text)",
-    lineHeight: 1.1,
+    lineHeight: 1.2,
   },
-  brandSub: { fontSize: 11.5, color: "var(--muted)", letterSpacing: "0.02em" },
-  topActions: { display: "flex", alignItems: "center", gap: 8 },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    background: "var(--card)",
-    border: "1px solid var(--border)",
-    color: "var(--text-2)",
+  brandSub: {
+    fontSize: 11,
+    color: "var(--muted)",
+    letterSpacing: "0.02em",
+  },
+  sideNav: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+    overflowY: "auto",
+  },
+  navGroup: {
+    marginBottom: 4,
+  },
+  navGroupLabel: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    color: "var(--muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    padding: "8px 10px 3px",
+  },
+  navItem: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 9,
+    width: "100%",
+    padding: "7px 10px",
+    borderRadius: 9,
+    border: "none",
+    background: "transparent",
+    color: "var(--text-2)",
+    fontSize: 13.5,
+    fontWeight: 500,
     cursor: "pointer",
+    textAlign: "left",
+    transition: "background 0.12s, color 0.12s",
+  },
+  navItemOn: {
+    background: "var(--card)",
+    color: "var(--text)",
+    fontWeight: 600,
     boxShadow: "var(--shadow-sm)",
-    transition: "background 0.15s",
+  },
+  sideBottom: {
+    borderTop: "1px solid var(--border)",
+    paddingTop: 14,
+    marginTop: 8,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  sideUser: {
+    display: "flex",
+    alignItems: "center",
+    gap: 9,
+    padding: "0 4px",
+    minWidth: 0,
   },
   avatar: {
-    width: 34,
-    height: 34,
+    width: 30,
+    height: 30,
     borderRadius: "50%",
     background: "var(--text)",
     color: "var(--bg)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 600,
+    flexShrink: 0,
   },
-  eventRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 12,
+  userEmail: {
+    fontSize: 11.5,
+    color: "var(--text-2)",
+    fontWeight: 500,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    maxWidth: 130,
   },
-  infoBar: {
+  roleBadge: {
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color: "var(--accent)",
+    background: "var(--accent-tint)",
+    padding: "2px 6px",
+    borderRadius: 5,
+  },
+  sideActions: {
     display: "flex",
-    alignItems: "center",
-    gap: 12,
-    background: "var(--card)",
+    gap: 6,
+    padding: "0 4px",
+  },
+  iconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    background: "transparent",
     border: "1px solid var(--border)",
-    borderRadius: 12,
-    padding: "10px 12px",
-    marginBottom: 18,
-    boxShadow: "var(--shadow-sm)",
+    color: "var(--text-2)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    transition: "background 0.15s",
+  },
+  main: {
+    flex: 1,
+    minWidth: 0,
+    padding: "32px 40px 64px",
+  },
+  eventHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 28,
+    paddingBottom: 20,
+    borderBottom: "1px solid var(--border)",
+  },
+  eventHeaderMain: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    minWidth: 0,
+    flex: 1,
   },
   posterThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 9,
+    width: 52,
+    height: 52,
+    borderRadius: 11,
     objectFit: "cover",
     border: "1px solid var(--border)",
     flexShrink: 0,
   },
-  infoVenue: { fontSize: 12.5, fontWeight: 600, color: "var(--text)" },
-  infoDesc: {
-    fontSize: 12,
-    color: "var(--text-2)",
-    lineHeight: 1.45,
-    marginTop: 1,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical",
+  eventName: {
+    fontFamily: "var(--font-fraunces), serif",
+    fontSize: 22,
+    fontWeight: 600,
+    color: "var(--text)",
+    lineHeight: 1.2,
+    marginBottom: 2,
   },
-  linkRow: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 },
+  eventVenue: {
+    fontSize: 13,
+    color: "var(--text-2)",
+    marginBottom: 6,
+    lineHeight: 1.4,
+  },
+  linkRow: {
+    display: "flex",
+    gap: 6,
+    flexWrap: "wrap",
+  },
   linkChip: {
     display: "inline-flex",
     alignItems: "center",
@@ -498,75 +605,44 @@ const s: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 5,
-    background: "var(--inset)",
+    background: "var(--card)",
     border: "1px solid var(--border)",
     color: "var(--text-2)",
     fontSize: 12.5,
     fontWeight: 600,
-    borderRadius: 8,
-    padding: "8px 12px",
+    borderRadius: 9,
+    padding: "8px 13px",
     cursor: "pointer",
     flexShrink: 0,
-    alignSelf: "flex-start",
+    boxShadow: "var(--shadow-sm)",
   },
   countdown: {
     display: "flex",
     alignItems: "center",
-    gap: 7,
-    fontSize: 12.5,
+    gap: 6,
+    fontSize: 12,
     fontWeight: 600,
-    padding: "7px 12px",
+    padding: "5px 10px",
     borderRadius: 999,
     border: "1px solid transparent",
     whiteSpace: "nowrap",
   },
-  dot: { width: 6, height: 6, borderRadius: "50%", display: "inline-block" },
-  tabs: {
-    display: "flex",
-    gap: 3,
-    padding: 4,
-    background: "var(--bg-2)",
-    borderRadius: 12,
-    marginBottom: 22,
-    overflowX: "auto",
-  },
-  tab: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    flex: 1,
-    minWidth: "fit-content",
-    background: "transparent",
-    border: "none",
-    borderRadius: 9,
-    padding: "8px 12px",
-    fontSize: 13,
-    fontWeight: 500,
-    color: "var(--text-2)",
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    transition: "background 0.18s, color 0.18s, box-shadow 0.18s",
-  },
-  tabOn: {
-    background: "var(--card)",
-    color: "var(--text)",
-    fontWeight: 600,
-    boxShadow: "var(--shadow-sm)",
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    display: "inline-block",
+    flexShrink: 0,
   },
   content: {
-    animation: "lk-fade-up 0.28s ease both",
+    animation: "lk-fade-up 0.22s ease both",
   },
   empty: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     textAlign: "center",
-    padding: "64px 24px",
-    background: "var(--card)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius)",
-    boxShadow: "var(--shadow-sm)",
+    padding: "80px 24px",
   },
   emptyIcon: {
     width: 52,
@@ -581,31 +657,15 @@ const s: Record<string, React.CSSProperties> = {
   },
   emptyTitle: {
     fontFamily: "var(--font-fraunces), serif",
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 600,
     color: "var(--text)",
     marginBottom: 6,
   },
-  emptySub: { fontSize: 13.5, color: "var(--text-2)", maxWidth: 340, lineHeight: 1.55 },
-  footer: {
-    marginTop: 32,
-    paddingTop: 16,
-    borderTop: "1px solid var(--border)",
-    fontSize: 12,
-    color: "var(--muted)",
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  roleBadge: {
-    fontSize: 10.5,
-    fontWeight: 600,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    color: "var(--accent)",
-    background: "var(--accent-tint)",
-    padding: "2px 8px",
-    borderRadius: 6,
+  emptySub: {
+    fontSize: 13.5,
+    color: "var(--text-2)",
+    maxWidth: 340,
+    lineHeight: 1.55,
   },
 }
