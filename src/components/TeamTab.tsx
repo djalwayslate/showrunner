@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Shield, Plus, X, Mail, Phone, AtSign, Pencil, Trash2, Sparkles, LayoutGrid, GitBranch } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import type { Profile } from "@/lib/types"
@@ -20,7 +20,7 @@ type TeamMember = {
 }
 
 const AVATAR_COLORS = ["#C5613D", "#2D7DD2", "#3CAA6F", "#8B5CF6", "#E85D75", "#F59E0B", "#0F7270", "#6B7280"]
-const DEPARTMENTS = ["Leadership", "Operations", "Creative", "Marketing", "Technical", "Finance", "General"]
+const DEPT_SUGGESTIONS = ["Leadership", "Operations", "Creative", "Marketing", "Technical", "Finance", "General"]
 const ROLES: Profile["role"][] = ["admin", "core", "sponsor", "artist"]
 const ROLE_DESC: Record<Profile["role"], string> = {
   admin: "Full access — everything incl. budget, team & settings",
@@ -37,6 +37,10 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<TeamMember | null>(null)
   const [view, setView] = useState<"grid" | "org">("grid")
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ dept: string; sub: string | null } | null>(null)
+  const [renamingDept, setRenamingDept] = useState<{ from: string; to: string } | null>(null)
+  const renameRef = useRef<HTMLInputElement>(null)
   const db = createClient()
 
   async function load() {
@@ -53,6 +57,10 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
     setLoading(false)
   }
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (renamingDept) renameRef.current?.focus()
+  }, [renamingDept])
 
   async function saveMember(m: TeamMember) {
     if (m.id === "__new__") {
@@ -77,6 +85,21 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
     await db.from("profiles").update({ role }).eq("id", id)
   }
 
+  async function moveMember(id: string, dept: string, sub: string | null) {
+    setMembers((prev) => prev.map((m) => m.id === id ? { ...m, department: dept, sub_department: sub } : m))
+    await db.from("team_members").update({ department: dept, sub_department: sub }).eq("id", id)
+    setDraggedId(null)
+    setDropTarget(null)
+  }
+
+  async function renameDept(from: string, to: string) {
+    const trimmed = to.trim()
+    if (!trimmed || trimmed === from) { setRenamingDept(null); return }
+    setMembers((prev) => prev.map((m) => m.department === from ? { ...m, department: trimmed } : m))
+    await db.from("team_members").update({ department: trimmed }).eq("department", from)
+    setRenamingDept(null)
+  }
+
   if (loading) return <div style={s.skeleton} />
 
   const newBlank: TeamMember = {
@@ -84,21 +107,27 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
     email: "", phone: "", instagram: "", avatar_color: AVATAR_COLORS[0], sort_order: members.length,
   }
 
-  // Group by department
+  // Group by department — dynamic from members data
   const byDept: Record<string, TeamMember[]> = {}
-  DEPARTMENTS.forEach((d) => { byDept[d] = [] })
   members.forEach((m) => {
     const dept = m.department || "General"
     if (!byDept[dept]) byDept[dept] = []
     byDept[dept].push(m)
   })
-  const activeDepts = DEPARTMENTS.filter((d) => byDept[d]?.length > 0)
-
-  // Org chart layout
+  // All unique dept names from members (non-Leadership)
+  const memberDepts = [...new Set(members.map((m) => m.department || "General"))]
   const leaderMembers = byDept["Leadership"] ?? []
-  const nonLeaderDepts = DEPARTMENTS.filter((d) => d !== "Leadership") // always show all in org view
-  const cols = nonLeaderDepts.length <= 4 ? nonLeaderDepts.length : 3
-  const showHBar = nonLeaderDepts.length > 1 && nonLeaderDepts.length <= 4
+  // Org depts: all non-leadership depts from members + at least a few defaults so chart isn't blank
+  const orgDepts = [...new Set([
+    ...memberDepts.filter((d) => d !== "Leadership"),
+    "Operations", "Creative", "Marketing", "Technical",
+  ])].sort()
+  const cols = orgDepts.length <= 4 ? orgDepts.length : 3
+  const showHBar = orgDepts.length > 1 && orgDepts.length <= 4
+
+  // All dept names for autocomplete
+  const deptOptions = [...new Set([...memberDepts, ...DEPT_SUGGESTIONS])]
+  const subDeptOptions = [...new Set(members.map((m) => m.sub_department).filter(Boolean) as string[])]
 
   return (
     <div>
@@ -139,46 +168,44 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
         <div style={{ overflowX: "auto", paddingBottom: 4 }}>
           <div style={{ minWidth: 340 }}>
 
-            {/* Leadership row — always at top */}
+            {/* Leadership — always at top, drop target */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <div style={{
-                display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", alignItems: "flex-start",
-                background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14,
-                padding: "12px 14px 10px",
-              }}>
+              <div
+                style={{
+                  display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", alignItems: "flex-start",
+                  background: dropTarget?.dept === "Leadership" ? "var(--accent-tint)" : "var(--card)",
+                  border: `1px solid ${dropTarget?.dept === "Leadership" ? "var(--accent)" : "var(--border)"}`,
+                  borderRadius: 14, padding: "12px 14px 10px", transition: "background 0.15s, border-color 0.15s",
+                }}
+                onDragOver={(e) => { e.preventDefault(); setDropTarget({ dept: "Leadership", sub: null }) }}
+                onDragLeave={() => setDropTarget(null)}
+                onDrop={(e) => { e.preventDefault(); if (draggedId) moveMember(draggedId, "Leadership", null) }}
+              >
                 <div style={s.deptTag}>Leadership</div>
                 {leaderMembers.map((m) => (
-                  <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill={false} />
+                  <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill={false}
+                    onDragStart={() => setDraggedId(m.id)} onDragEnd={() => { setDraggedId(null); setDropTarget(null) }}
+                  />
                 ))}
                 {isAdmin && (
-                  <button style={s.addRoleBtn}
-                    onClick={() => setModal({ ...newBlank, department: "Leadership" })}
-                    type="button">
+                  <button style={s.addRoleBtn} onClick={() => setModal({ ...newBlank, department: "Leadership" })} type="button">
                     + Open role
                   </button>
                 )}
               </div>
-              {/* Stem connecting to department row */}
               <div style={{ width: 2, height: 24, background: "var(--border)" }} />
             </div>
 
             {/* Department columns */}
             <div style={{ position: "relative" }}>
-              {/* Horizontal bar spanning from center of col-1 to center of col-N */}
               {showHBar && (
                 <div style={{
                   position: "absolute", top: 0, height: 2, background: "var(--border)", zIndex: 0,
-                  left: `calc(100% / ${cols} / 2)`,
-                  right: `calc(100% / ${cols} / 2)`,
+                  left: `calc(100% / ${cols} / 2)`, right: `calc(100% / ${cols} / 2)`,
                 }} />
               )}
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${cols}, 1fr)`,
-                gap: 10,
-                position: "relative", zIndex: 1,
-              }}>
-                {nonLeaderDepts.map((dept) => {
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10, position: "relative", zIndex: 1 }}>
+                {orgDepts.map((dept) => {
                   const deptMembers = byDept[dept] ?? []
                   const subGroups: Record<string, TeamMember[]> = {}
                   const noSub: TeamMember[] = []
@@ -190,28 +217,85 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
                       noSub.push(m)
                     }
                   })
+                  const isOver = dropTarget?.dept === dept && dropTarget.sub === null
+
                   return (
-                    <div key={dept} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    <div key={dept} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}
+                      onDragOver={(e) => { e.preventDefault(); setDropTarget({ dept, sub: null }) }}
+                      onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as HTMLElement)) setDropTarget(null) }}
+                      onDrop={(e) => { e.preventDefault(); if (draggedId) moveMember(draggedId, dept, null) }}
+                    >
                       <div style={{ width: 2, height: 20, background: "var(--border)" }} />
-                      <div style={s.deptTag}>{dept}</div>
-                      {noSub.map((m) => (
-                        <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill />
-                      ))}
-                      {Object.entries(subGroups).map(([sub, subMembers]) => (
-                        <div key={sub} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 10, padding: "7px 7px 5px", background: "var(--inset)" }}>
-                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--muted)", textAlign: "center" as const, marginBottom: 6 }}>{sub}</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                            {subMembers.map((m) => (
-                              <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill />
-                            ))}
-                          </div>
-                          {isAdmin && (
-                            <button style={{ ...s.addRoleBtn, marginTop: 5, fontSize: 11 }}
-                              onClick={() => setModal({ ...newBlank, department: dept, sub_department: sub })}
-                              type="button">+ role in {sub}</button>
-                          )}
+
+                      {/* Dept label — click to rename */}
+                      {isAdmin && renamingDept?.from === dept ? (
+                        <input
+                          ref={renameRef}
+                          style={{ ...s.deptRenameInput }}
+                          value={renamingDept.to}
+                          onChange={(e) => setRenamingDept({ from: dept, to: e.target.value })}
+                          onBlur={() => renameDept(dept, renamingDept.to)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") renameDept(dept, renamingDept.to)
+                            if (e.key === "Escape") setRenamingDept(null)
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{ ...s.deptTag, cursor: isAdmin ? "text" : "default", padding: "2px 6px", borderRadius: 5, transition: "background 0.12s" }}
+                          title={isAdmin ? "Click to rename" : undefined}
+                          onClick={() => isAdmin && setRenamingDept({ from: dept, to: dept })}
+                        >
+                          {dept}
                         </div>
-                      ))}
+                      )}
+
+                      {/* Drop zone highlight */}
+                      <div style={{
+                        width: "100%", minHeight: noSub.length === 0 && Object.keys(subGroups).length === 0 ? 36 : 0,
+                        borderRadius: 10, transition: "background 0.15s",
+                        background: isOver && draggedId ? "var(--accent-tint)" : "transparent",
+                        border: isOver && draggedId ? "1px dashed var(--accent)" : "1px solid transparent",
+                        display: "flex", flexDirection: "column", gap: 5, padding: isOver && draggedId ? 6 : 0,
+                      }}>
+                        {noSub.map((m) => (
+                          <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill
+                            onDragStart={() => setDraggedId(m.id)} onDragEnd={() => { setDraggedId(null); setDropTarget(null) }}
+                          />
+                        ))}
+                      </div>
+
+                      {/* Sub-department groups */}
+                      {Object.entries(subGroups).map(([sub, subMembers]) => {
+                        const subOver = dropTarget?.dept === dept && dropTarget.sub === sub
+                        return (
+                          <div key={sub}
+                            style={{
+                              width: "100%", border: `1px solid ${subOver ? "var(--accent)" : "var(--border)"}`,
+                              borderRadius: 10, padding: "7px 7px 5px",
+                              background: subOver ? "var(--accent-tint)" : "var(--inset)",
+                              transition: "background 0.15s, border-color 0.15s",
+                            }}
+                            onDragOver={(e) => { e.stopPropagation(); e.preventDefault(); setDropTarget({ dept, sub }) }}
+                            onDrop={(e) => { e.stopPropagation(); e.preventDefault(); if (draggedId) moveMember(draggedId, dept, sub) }}
+                          >
+                            <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--muted)", textAlign: "center" as const, marginBottom: 6 }}>{sub}</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                              {subMembers.map((m) => (
+                                <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill
+                                  onDragStart={() => setDraggedId(m.id)} onDragEnd={() => { setDraggedId(null); setDropTarget(null) }}
+                                />
+                              ))}
+                            </div>
+                            {isAdmin && (
+                              <button style={{ ...s.addRoleBtn, marginTop: 5, fontSize: 11 }}
+                                onClick={() => setModal({ ...newBlank, department: dept, sub_department: sub })}
+                                type="button">+ role in {sub}</button>
+                            )}
+                          </div>
+                        )
+                      })}
+
                       {isAdmin && (
                         <button style={s.addRoleBtn}
                           onClick={() => setModal({ ...newBlank, department: dept })}
@@ -275,6 +359,8 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
           member={modal}
           isNew={modal.id === "__new__"}
           allMembers={members}
+          deptOptions={deptOptions}
+          subDeptOptions={subDeptOptions}
           onSave={saveMember}
           onDelete={modal.id !== "__new__" ? () => deleteMember(modal.id) : undefined}
           onClose={() => setModal(null)}
@@ -284,21 +370,30 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
   )
 }
 
-function OrgNode({ m, isAdmin, onEdit, fill }: { m: TeamMember; isAdmin: boolean; onEdit: () => void; fill?: boolean }) {
+function OrgNode({ m, isAdmin, onEdit, fill, onDragStart, onDragEnd }: {
+  m: TeamMember; isAdmin: boolean; onEdit: () => void; fill?: boolean
+  onDragStart?: () => void; onDragEnd?: () => void
+}) {
   const positions = m.positions || []
   return (
-    <div style={{
-      background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 11,
-      padding: "10px 10px 9px", display: "flex", flexDirection: "column", alignItems: "center",
-      gap: 5, width: fill ? "100%" : "auto", minWidth: 120, maxWidth: 200,
-      position: "relative", boxShadow: "var(--shadow-sm)",
-    }}>
+    <div
+      draggable={isAdmin}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      style={{
+        background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 11,
+        padding: "10px 10px 9px", display: "flex", flexDirection: "column", alignItems: "center",
+        gap: 5, width: fill ? "100%" : "auto", minWidth: 120, maxWidth: 200,
+        position: "relative", boxShadow: "var(--shadow-sm)",
+        cursor: isAdmin ? "grab" : "default",
+      }}
+    >
       {isAdmin && (
         <button style={{
           position: "absolute", top: 5, right: 5, width: 22, height: 22, borderRadius: 6,
           background: "var(--inset)", border: "1px solid var(--border)", color: "var(--muted)",
           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-        }} onClick={onEdit} type="button">
+        }} onClick={(e) => { e.stopPropagation(); onEdit() }} type="button">
           <Pencil size={10} strokeWidth={2} />
         </button>
       )}
@@ -379,10 +474,12 @@ function MemberCard({ m, isAdmin, onEdit, compact }: {
   )
 }
 
-function MemberModal({ member, isNew, allMembers, onSave, onDelete, onClose }: {
+function MemberModal({ member, isNew, allMembers, deptOptions, subDeptOptions, onSave, onDelete, onClose }: {
   member: TeamMember
   isNew: boolean
   allMembers: TeamMember[]
+  deptOptions: string[]
+  subDeptOptions: string[]
   onSave: (m: TeamMember) => void
   onDelete?: () => void
   onClose: () => void
@@ -420,9 +517,7 @@ function MemberModal({ member, isNew, allMembers, onSave, onDelete, onClose }: {
         }),
       })
       const data = await res.json()
-      if (data.positions?.length) {
-        setF("positions", [...new Set([...form.positions, ...data.positions])])
-      }
+      if (data.positions?.length) setF("positions", [...new Set([...form.positions, ...data.positions])])
       if (data.department && !form.department) setF("department", data.department)
       if (data.reason) setSuggestionNote(data.reason)
     } finally {
@@ -469,32 +564,37 @@ function MemberModal({ member, isNew, allMembers, onSave, onDelete, onClose }: {
                 onChange={(e) => setPosInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addPosition(posInput) }
-                  if (e.key === "Backspace" && !posInput && form.positions.length) {
-                    removePosition(form.positions[form.positions.length - 1])
-                  }
+                  if (e.key === "Backspace" && !posInput && form.positions.length) removePosition(form.positions[form.positions.length - 1])
                 }}
                 placeholder={form.positions.length === 0 ? "Type a role, press Enter…" : "Add another…"}
               />
             </div>
           </div>
 
-          <div style={{ gridColumn: "1/-1" }}>
+          <div>
             <label style={s.label}>Department</label>
-            <div style={s.deptChips}>
-              {DEPARTMENTS.map((d) => (
-                <button key={d}
-                  style={{ ...s.deptChipBtn, ...(form.department === d ? s.deptChipActive : {}) }}
-                  onClick={() => setF("department", form.department === d ? null : d)}
-                  type="button">
-                  {d}
-                </button>
-              ))}
-            </div>
+            <input
+              list="dept-opts" style={s.input}
+              value={form.department ?? ""}
+              onChange={(e) => setF("department", e.target.value || null)}
+              placeholder="e.g. Marketing, Creative…"
+            />
+            <datalist id="dept-opts">
+              {deptOptions.map((d) => <option key={d} value={d} />)}
+            </datalist>
           </div>
 
-          <div style={{ gridColumn: "1/-1" }}>
-            <label style={s.label}>Sub-department <span style={{ fontWeight: 400, color: "var(--muted)" }}>— optional, groups within a dept</span></label>
-            <input style={s.input} value={form.sub_department ?? ""} onChange={(e) => setF("sub_department", e.target.value || null)} placeholder="e.g. Digital, Communications, Live…" />
+          <div>
+            <label style={s.label}>Sub-department <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 10.5 }}>optional</span></label>
+            <input
+              list="subdept-opts" style={s.input}
+              value={form.sub_department ?? ""}
+              onChange={(e) => setF("sub_department", e.target.value || null)}
+              placeholder="e.g. Digital, Live…"
+            />
+            <datalist id="subdept-opts">
+              {subDeptOptions.map((d) => <option key={d} value={d} />)}
+            </datalist>
           </div>
 
           <div>
@@ -520,13 +620,11 @@ function MemberModal({ member, isNew, allMembers, onSave, onDelete, onClose }: {
                 style={{ ...s.input, height: 62, resize: "none", paddingRight: 100, fontFamily: "inherit" } as React.CSSProperties}
                 value={form.context ?? ""}
                 onChange={(e) => setF("context", e.target.value)}
-                placeholder="e.g. loves social media, helps at events, new to the team…"
+                placeholder="e.g. manages social media, helps at events…"
               />
               <button
                 style={{ ...s.aiBtn, opacity: suggesting || (!form.context?.trim() && !form.name?.trim()) ? 0.5 : 1 }}
-                onClick={suggest}
-                disabled={suggesting || (!form.context?.trim() && !form.name?.trim())}
-                type="button"
+                onClick={suggest} disabled={suggesting || (!form.context?.trim() && !form.name?.trim())} type="button"
               >
                 <Sparkles size={11} strokeWidth={2.2} />
                 {suggesting ? "…" : "AI Suggest"}
@@ -578,10 +676,9 @@ const s: Record<string, React.CSSProperties> = {
   posChip: { fontSize: 10.5, fontWeight: 600, color: "var(--accent)", background: "var(--accent-tint)", borderRadius: 5, padding: "2px 7px" },
   contactList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 4 },
   contactRow: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-2)", textDecoration: "none", overflow: "hidden" },
-  // Org chart
-  deptTag: { width: "100%", textAlign: "center", fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--muted)", marginBottom: 2 },
+  deptTag: { width: "100%", textAlign: "center", fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--muted)" },
+  deptRenameInput: { width: "80%", textAlign: "center", fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--text)", background: "var(--inset)", border: "1px solid var(--accent)", borderRadius: 5, padding: "2px 6px", outline: "none" },
   addRoleBtn: { width: "100%", border: "1px dashed var(--border-strong)", borderRadius: 10, padding: "7px 8px", background: "transparent", fontSize: 11.5, fontWeight: 600, color: "var(--muted)", cursor: "pointer", textAlign: "center" as const },
-  // App Access
   list: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 },
   row: { display: "flex", alignItems: "center", gap: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "11px 14px", boxShadow: "var(--shadow-sm)" },
   rowAvatar: { width: 36, height: 36, borderRadius: "50%", background: "var(--text)", color: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 600, flexShrink: 0 },
@@ -609,9 +706,6 @@ const s: Record<string, React.CSSProperties> = {
   posChipEdit: { display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "var(--accent-tint)", borderRadius: 6, padding: "3px 8px" },
   chipX: { display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: "pointer", color: "var(--accent)", padding: 0, lineHeight: 1 },
   chipInput: { border: "none", background: "transparent", outline: "none", fontSize: 13, color: "var(--text)", flex: 1, minWidth: 80 },
-  deptChips: { display: "flex", flexWrap: "wrap", gap: 6 },
-  deptChipBtn: { fontSize: 12, fontWeight: 600, color: "var(--text-2)", background: "var(--inset)", border: "1px solid var(--border)", borderRadius: 7, padding: "5px 10px", cursor: "pointer" },
-  deptChipActive: { color: "#fff", background: "var(--text)", border: "1px solid var(--text)" },
   aiBtn: { position: "absolute", right: 8, bottom: 8, display: "flex", alignItems: "center", gap: 5, background: "var(--text)", color: "var(--bg)", border: "none", borderRadius: 7, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" },
   suggestionNote: { fontSize: 11.5, color: "var(--accent)", marginTop: 6, fontStyle: "italic" },
   modalFoot: { display: "flex", alignItems: "center", gap: 8, paddingTop: 4 },
