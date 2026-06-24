@@ -10,6 +10,7 @@ type TeamMember = {
   name: string
   positions: string[]
   department: string | null
+  sub_department: string | null
   context: string | null
   email: string | null
   phone: string | null
@@ -79,7 +80,7 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
   if (loading) return <div style={s.skeleton} />
 
   const newBlank: TeamMember = {
-    id: "__new__", name: "", positions: [], department: null, context: null,
+    id: "__new__", name: "", positions: [], department: null, sub_department: null, context: null,
     email: "", phone: "", instagram: "", avatar_color: AVATAR_COLORS[0], sort_order: members.length,
   }
 
@@ -177,23 +178,48 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
                 gap: 10,
                 position: "relative", zIndex: 1,
               }}>
-                {nonLeaderDepts.map((dept) => (
-                  <div key={dept} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                    {/* Vertical stem from horizontal bar */}
-                    <div style={{ width: 2, height: 20, background: "var(--border)" }} />
-                    <div style={s.deptTag}>{dept}</div>
-                    {byDept[dept]?.map((m) => (
-                      <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill />
-                    ))}
-                    {isAdmin && (
-                      <button style={s.addRoleBtn}
-                        onClick={() => setModal({ ...newBlank, department: dept })}
-                        type="button">
-                        + Open role
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {nonLeaderDepts.map((dept) => {
+                  const deptMembers = byDept[dept] ?? []
+                  const subGroups: Record<string, TeamMember[]> = {}
+                  const noSub: TeamMember[] = []
+                  deptMembers.forEach((m) => {
+                    if (m.sub_department) {
+                      if (!subGroups[m.sub_department]) subGroups[m.sub_department] = []
+                      subGroups[m.sub_department].push(m)
+                    } else {
+                      noSub.push(m)
+                    }
+                  })
+                  return (
+                    <div key={dept} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                      <div style={{ width: 2, height: 20, background: "var(--border)" }} />
+                      <div style={s.deptTag}>{dept}</div>
+                      {noSub.map((m) => (
+                        <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill />
+                      ))}
+                      {Object.entries(subGroups).map(([sub, subMembers]) => (
+                        <div key={sub} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 10, padding: "7px 7px 5px", background: "var(--inset)" }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--muted)", textAlign: "center" as const, marginBottom: 6 }}>{sub}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                            {subMembers.map((m) => (
+                              <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill />
+                            ))}
+                          </div>
+                          {isAdmin && (
+                            <button style={{ ...s.addRoleBtn, marginTop: 5, fontSize: 11 }}
+                              onClick={() => setModal({ ...newBlank, department: dept, sub_department: sub })}
+                              type="button">+ role in {sub}</button>
+                          )}
+                        </div>
+                      ))}
+                      {isAdmin && (
+                        <button style={s.addRoleBtn}
+                          onClick={() => setModal({ ...newBlank, department: dept })}
+                          type="button">+ Open role</button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
@@ -464,6 +490,11 @@ function MemberModal({ member, isNew, allMembers, onSave, onDelete, onClose }: {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={s.label}>Sub-department <span style={{ fontWeight: 400, color: "var(--muted)" }}>— optional, groups within a dept</span></label>
+            <input style={s.input} value={form.sub_department ?? ""} onChange={(e) => setF("sub_department", e.target.value || null)} placeholder="e.g. Digital, Communications, Live…" />
           </div>
 
           <div>
