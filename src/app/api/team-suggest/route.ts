@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 const ai = new Anthropic()
 
-const DEPARTMENTS = ["Leadership", "Creative", "Operations", "Marketing", "Technical", "Finance", "General"]
+const DEPARTMENTS = ["Leadership", "Operations", "Booking", "Hospitality", "Technical", "Graphic Design", "Creative", "Communications", "Marketing"]
 
 export async function POST(req: NextRequest) {
   const { name, context, existingMembers } = await req.json()
