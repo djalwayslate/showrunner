@@ -83,7 +83,7 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
     email: "", phone: "", instagram: "", avatar_color: AVATAR_COLORS[0], sort_order: members.length,
   }
 
-  // Group by department for org chart
+  // Group by department
   const byDept: Record<string, TeamMember[]> = {}
   DEPARTMENTS.forEach((d) => { byDept[d] = [] })
   members.forEach((m) => {
@@ -92,6 +92,12 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
     byDept[dept].push(m)
   })
   const activeDepts = DEPARTMENTS.filter((d) => byDept[d]?.length > 0)
+
+  // Org chart layout
+  const leaderMembers = byDept["Leadership"] ?? []
+  const nonLeaderDepts = DEPARTMENTS.filter((d) => d !== "Leadership") // always show all in org view
+  const cols = nonLeaderDepts.length <= 4 ? nonLeaderDepts.length : 3
+  const showHBar = nonLeaderDepts.length > 1 && nonLeaderDepts.length <= 4
 
   return (
     <div>
@@ -117,33 +123,81 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
         </div>
       </div>
 
-      {members.length === 0 ? (
-        <div style={s.empty}>No team members yet.{isAdmin ? " Add your first one above." : ""}</div>
-      ) : view === "grid" ? (
-        <div style={s.grid}>
-          {members.map((m) => (
-            <MemberCard key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} />
-          ))}
-        </div>
+      {view === "grid" ? (
+        members.length === 0 ? (
+          <div style={s.empty}>No team members yet.{isAdmin ? " Add your first one above." : ""}</div>
+        ) : (
+          <div style={s.grid}>
+            {members.map((m) => (
+              <MemberCard key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} />
+            ))}
+          </div>
+        )
       ) : (
-        <div style={s.orgWrap}>
-          {activeDepts.length === 0 ? (
-            <div style={s.empty}>Assign departments to members to see the org chart.</div>
-          ) : (
-            activeDepts.map((dept) => (
-              <div key={dept} style={s.deptSection}>
-                <div style={s.deptHeader}>
-                  <span style={s.deptLabel}>{dept}</span>
-                  <span style={s.deptCount}>{byDept[dept].length}</span>
-                </div>
-                <div style={s.deptCards}>
-                  {byDept[dept].map((m) => (
-                    <MemberCard key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} compact />
-                  ))}
-                </div>
+        /* ── ORG CHART VIEW ── */
+        <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+          <div style={{ minWidth: 340 }}>
+
+            {/* Leadership row — always at top */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{
+                display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center",
+                background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14,
+                padding: "12px 14px 10px",
+              }}>
+                <div style={s.deptTag}>Leadership</div>
+                {leaderMembers.map((m) => (
+                  <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} />
+                ))}
+                {isAdmin && (
+                  <button style={s.addRoleBtn}
+                    onClick={() => setModal({ ...newBlank, department: "Leadership" })}
+                    type="button">
+                    + Open role
+                  </button>
+                )}
               </div>
-            ))
-          )}
+              {/* Stem connecting to department row */}
+              <div style={{ width: 2, height: 24, background: "var(--border)" }} />
+            </div>
+
+            {/* Department columns */}
+            <div style={{ position: "relative" }}>
+              {/* Horizontal bar spanning from center of col-1 to center of col-N */}
+              {showHBar && (
+                <div style={{
+                  position: "absolute", top: 0, height: 2, background: "var(--border)", zIndex: 0,
+                  left: `calc(100% / ${cols} / 2)`,
+                  right: `calc(100% / ${cols} / 2)`,
+                }} />
+              )}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                gap: 10,
+                position: "relative", zIndex: 1,
+              }}>
+                {nonLeaderDepts.map((dept) => (
+                  <div key={dept} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    {/* Vertical stem from horizontal bar */}
+                    <div style={{ width: 2, height: 20, background: "var(--border)" }} />
+                    <div style={s.deptTag}>{dept}</div>
+                    {byDept[dept]?.map((m) => (
+                      <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} />
+                    ))}
+                    {isAdmin && (
+                      <button style={s.addRoleBtn}
+                        onClick={() => setModal({ ...newBlank, department: dept })}
+                        type="button">
+                        + Open role
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
         </div>
       )}
 
@@ -199,6 +253,47 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
           onDelete={modal.id !== "__new__" ? () => deleteMember(modal.id) : undefined}
           onClose={() => setModal(null)}
         />
+      )}
+    </div>
+  )
+}
+
+function OrgNode({ m, isAdmin, onEdit }: { m: TeamMember; isAdmin: boolean; onEdit: () => void }) {
+  const positions = m.positions || []
+  return (
+    <div style={{
+      background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 11,
+      padding: "10px 10px 9px", display: "flex", flexDirection: "column", alignItems: "center",
+      gap: 5, width: "100%", position: "relative", boxShadow: "var(--shadow-sm)",
+    }}>
+      {isAdmin && (
+        <button style={{
+          position: "absolute", top: 5, right: 5, width: 22, height: 22, borderRadius: 6,
+          background: "var(--inset)", border: "1px solid var(--border)", color: "var(--muted)",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+        }} onClick={onEdit} type="button">
+          <Pencil size={10} strokeWidth={2} />
+        </button>
+      )}
+      <div style={{
+        width: 32, height: 32, borderRadius: 9, background: m.avatar_color, flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 13, fontWeight: 700, color: "#fff", fontFamily: "var(--font-fraunces), serif",
+      }}>
+        {m.name.charAt(0).toUpperCase() || "?"}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", textAlign: "center", lineHeight: 1.3, paddingRight: isAdmin ? 16 : 0 }}>
+        {m.name}
+      </div>
+      {positions.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "center" }}>
+          {positions.slice(0, 2).map((p) => (
+            <span key={p} style={{ fontSize: 9.5, fontWeight: 600, color: "var(--accent)", background: "var(--accent-tint)", borderRadius: 4, padding: "1px 5px" }}>{p}</span>
+          ))}
+          {positions.length > 2 && (
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", background: "var(--inset)", borderRadius: 4, padding: "1px 5px" }}>+{positions.length - 2}</span>
+          )}
+        </div>
       )}
     </div>
   )
@@ -329,7 +424,7 @@ function MemberModal({ member, isNew, allMembers, onSave, onDelete, onClose }: {
         <div style={s.fieldGrid}>
           <div style={{ gridColumn: "1/-1" }}>
             <label style={s.label}>Name *</label>
-            <input style={s.input} value={form.name} onChange={(e) => setF("name", e.target.value)} placeholder="Full name" />
+            <input style={s.input} value={form.name} onChange={(e) => setF("name", e.target.value)} placeholder="Full name or role title (e.g. Sound Engineer)" />
           </div>
 
           <div style={{ gridColumn: "1/-1" }}>
@@ -451,24 +546,22 @@ const s: Record<string, React.CSSProperties> = {
   posChip: { fontSize: 10.5, fontWeight: 600, color: "var(--accent)", background: "var(--accent-tint)", borderRadius: 5, padding: "2px 7px" },
   contactList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 4 },
   contactRow: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-2)", textDecoration: "none", overflow: "hidden" },
-  orgWrap: { display: "flex", flexDirection: "column", gap: 12, marginBottom: 4 },
-  deptSection: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden" },
-  deptHeader: { display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderBottom: "1px solid var(--border)", background: "var(--inset)" },
-  deptLabel: { fontFamily: "var(--font-fraunces), serif", fontSize: 13, fontWeight: 700, color: "var(--text)", flex: 1 },
-  deptCount: { fontSize: 11, fontWeight: 700, color: "var(--muted)", background: "var(--bg-2)", borderRadius: 20, padding: "1px 7px", border: "1px solid var(--border)" },
-  deptCards: { display: "flex", flexWrap: "wrap", gap: 10, padding: 12 },
+  // Org chart
+  deptTag: { width: "100%", textAlign: "center", fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.07em", color: "var(--muted)", marginBottom: 2 },
+  addRoleBtn: { width: "100%", border: "1px dashed var(--border-strong)", borderRadius: 10, padding: "7px 8px", background: "transparent", fontSize: 11.5, fontWeight: 600, color: "var(--muted)", cursor: "pointer", textAlign: "center" as const },
+  // App Access
   list: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 },
   row: { display: "flex", alignItems: "center", gap: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "11px 14px", boxShadow: "var(--shadow-sm)" },
   rowAvatar: { width: 36, height: 36, borderRadius: "50%", background: "var(--text)", color: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 600, flexShrink: 0 },
   rowName: { fontSize: 14, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 7 },
-  you: { fontSize: 10, fontWeight: 600, color: "var(--muted)", background: "var(--bg-2)", borderRadius: 5, padding: "1px 6px", textTransform: "uppercase", letterSpacing: "0.04em" },
+  you: { fontSize: 10, fontWeight: 600, color: "var(--muted)", background: "var(--bg-2)", borderRadius: 5, padding: "1px 6px", textTransform: "uppercase" as const, letterSpacing: "0.04em" },
   rowEmail: { fontSize: 12, color: "var(--muted)" },
-  roleSelect: { border: "1px solid transparent", borderRadius: 8, fontSize: 12.5, fontWeight: 600, padding: "7px 10px", cursor: "pointer", outline: "none", textTransform: "capitalize" },
-  roleBadge: { fontSize: 12, fontWeight: 600, borderRadius: 7, padding: "6px 11px", textTransform: "capitalize" },
+  roleSelect: { border: "1px solid transparent", borderRadius: 8, fontSize: 12.5, fontWeight: 600, padding: "7px 10px", cursor: "pointer", outline: "none", textTransform: "capitalize" as const },
+  roleBadge: { fontSize: 12, fontWeight: 600, borderRadius: 7, padding: "6px 11px", textTransform: "capitalize" as const },
   legend: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "14px 16px", boxShadow: "var(--shadow-sm)" },
   legendHead: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 12 },
   legendRow: { display: "flex", alignItems: "center", gap: 11, padding: "6px 0" },
-  legendTag: { fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "2px 9px", textTransform: "capitalize", minWidth: 58, textAlign: "center" },
+  legendTag: { fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "2px 9px", textTransform: "capitalize" as const, minWidth: 58, textAlign: "center" as const },
   legendText: { fontSize: 12.5, color: "var(--text-2)" },
   overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
   modalBox: { background: "var(--card)", borderRadius: 18, padding: "22px 22px 18px", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", gap: 16 },
