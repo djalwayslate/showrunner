@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Wand2, Loader, Link2, Check, ChevronDown, ChevronRight, Users, ExternalLink, CircleCheck } from "lucide-react"
+import { Wand2, Loader, Link2, Check, ChevronDown, ChevronRight, Send, CircleCheck, X, RotateCcw } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import {
   EVENT_CATEGORIES, ARTIST_CATEGORIES, categoryDef,
-  type AdvanceRecipient, type AdvanceRequest, type AdvanceStatus,
+  type FieldDef, type AdvanceRecipient, type AdvanceRequest, type AdvanceStatus,
 } from "@/lib/advancing/schema"
 import type { EventRow, LineupEntry } from "@/lib/types"
 
@@ -13,218 +13,255 @@ function newToken(): string {
   const r = () => crypto.randomUUID().replace(/-/g, "")
   return r() + r()
 }
-
 function prefillEvent(key: string, ev: EventRow | null): Record<string, unknown> {
   if (key === "stage_room") return { capacity: ev?.attendance ?? "", stage_name: ev?.stages?.[0] ?? "" }
   return {}
 }
 function prefillArtist(key: string, entry: LineupEntry): Record<string, unknown> {
-  if (key === "timetable") {
-    const set = entry.start_time && entry.end_time ? `${entry.start_time}–${entry.end_time}` : ""
-    return { set_time: set }
-  }
+  if (key === "timetable") return { set_time: entry.start_time && entry.end_time ? `${entry.start_time}–${entry.end_time}` : "" }
   return {}
+}
+function inputType(t: FieldDef["type"]): string {
+  return t === "textarea" || t === "bool" ? "text" : t
 }
 
 export default function AdvancingTab({ eventId, refreshKey }: { eventId: string; refreshKey: number }) {
-  const [recipients, setRecipients] = useState<AdvanceRecipient[]>([])
   const [requests, setRequests] = useState<AdvanceRequest[]>([])
-  const [lineupCount, setLineupCount] = useState(0)
+  const [recipients, setRecipients] = useState<AdvanceRecipient[]>([])
+  const [artists, setArtists] = useState<{ id: string; name: string }[]>([])
+  const [forms, setForms] = useState<Record<string, Record<string, unknown>>>({})
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [copied, setCopied] = useState<string | null>(null)
+  const [openGroup, setOpenGroup] = useState<string | null>("event")
   const db = createClient()
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [{ data: recs }, { data: reqs }, { count }] = await Promise.all([
-      db.from("advance_recipients").select("*").eq("event_id", eventId).order("created_at"),
+    const [{ data: reqs }, { data: recs }, { data: lineup }] = await Promise.all([
       db.from("advance_requests").select("*").eq("event_id", eventId).order("sort_order"),
-      db.from("lineup_entries").select("id", { count: "exact", head: true }).eq("event_id", eventId).eq("kind", "music"),
+      db.from("advance_recipients").select("*").eq("event_id", eventId),
+      db.from("lineup_entries").select("id, name").eq("event_id", eventId).eq("kind", "music").order("sort_order"),
     ])
-    setRecipients(recs ?? [])
     setRequests(reqs ?? [])
-    setLineupCount(count ?? 0)
+    setRecipients(recs ?? [])
+    setArtists((lineup ?? []).map((l) => ({ id: l.id, name: l.name })))
+    const f: Record<string, Record<string, unknown>> = {}
+    ;(reqs ?? []).forEach((r) => { f[r.id] = { ...(r.data ?? {}) } })
+    setForms(f)
     setLoading(false)
   }, [eventId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (eventId) load() }, [eventId, refreshKey, load])
 
-  async function generate() {
+  // Create any missing sections (team-owned: recipient_id stays null). Idempotent.
+  async function setup() {
     setBusy(true)
     try {
       const [{ data: ev }, { data: lineup }, { data: existing }] = await Promise.all([
         db.from("events").select("*").eq("id", eventId).single(),
         db.from("lineup_entries").select("*").eq("event_id", eventId).eq("kind", "music").order("sort_order"),
-        db.from("advance_recipients").select("*").eq("event_id", eventId),
+        db.from("advance_requests").select("lineup_entry_id, category").eq("event_id", eventId),
       ])
-
-      // Event-level contact (once)
-      if (!(existing ?? []).some((r) => r.scope === "event")) {
-        const { data: rec } = await db.from("advance_recipients")
-          .insert({ event_id: eventId, scope: "event", name: "Promoter / Venue", token: newToken() })
-          .select().single()
-        if (rec) {
-          await db.from("advance_requests").insert(EVENT_CATEGORIES.map((c, i) => ({
-            event_id: eventId, recipient_id: rec.id, category: c.key, title: c.title,
-            status: "open", sort_order: i, data: prefillEvent(c.key, ev),
-          })))
-        }
-      }
-
-      // Per-artist (skip artists already generated)
-      const done = new Set((existing ?? []).map((r) => r.lineup_entry_id).filter(Boolean))
+      const rows: Record<string, unknown>[] = []
+      const haveEvent = new Set((existing ?? []).filter((r) => !r.lineup_entry_id).map((r) => r.category))
+      EVENT_CATEGORIES.forEach((c, i) => {
+        if (!haveEvent.has(c.key)) rows.push({ event_id: eventId, lineup_entry_id: null, category: c.key, title: c.title, status: "open", sort_order: i, data: prefillEvent(c.key, ev) })
+      })
       for (const entry of (lineup ?? []) as LineupEntry[]) {
-        if (done.has(entry.id)) continue
-        const { data: rec } = await db.from("advance_recipients")
-          .insert({ event_id: eventId, scope: "artist", lineup_entry_id: entry.id, name: entry.name || "Artist", token: newToken() })
-          .select().single()
-        if (rec) {
-          await db.from("advance_requests").insert(ARTIST_CATEGORIES.map((c, i) => ({
-            event_id: eventId, recipient_id: rec.id, lineup_entry_id: entry.id, category: c.key, title: c.title,
-            status: "open", sort_order: i, data: prefillArtist(c.key, entry),
-          })))
-        }
+        const have = new Set((existing ?? []).filter((r) => r.lineup_entry_id === entry.id).map((r) => r.category))
+        ARTIST_CATEGORIES.forEach((c, i) => {
+          if (!have.has(c.key)) rows.push({ event_id: eventId, lineup_entry_id: entry.id, category: c.key, title: c.title, status: "open", sort_order: 10 + i, data: prefillArtist(c.key, entry) })
+        })
       }
+      if (rows.length) await db.from("advance_requests").insert(rows)
       await load()
     } finally {
       setBusy(false)
     }
   }
 
-  async function approve(reqId: string) {
-    setRequests((prev) => prev.map((r) => (r.id === reqId ? { ...r, status: "approved" } : r)))
-    await db.from("advance_requests").update({ status: "approved" }).eq("id", reqId)
+  function setField(reqId: string, key: string, value: unknown) {
+    setForms((f) => ({ ...f, [reqId]: { ...(f[reqId] ?? {}), [key]: value } }))
   }
-  async function reopen(reqId: string) {
-    setRequests((prev) => prev.map((r) => (r.id === reqId ? { ...r, status: "open" } : r)))
-    await db.from("advance_requests").update({ status: "open" }).eq("id", reqId)
+  async function saveReq(reqId: string) {
+    await db.from("advance_requests").update({ data: forms[reqId] ?? {}, updated_at: new Date().toISOString() }).eq("id", reqId)
+  }
+  async function setStatus(reqId: string, status: AdvanceStatus) {
+    setRequests((prev) => prev.map((r) => (r.id === reqId ? { ...r, status } : r)))
+    await db.from("advance_requests").update({ status }).eq("id", reqId)
+  }
+  async function sendOut(req: AdvanceRequest, name: string, email: string) {
+    const token = newToken()
+    const { data: rec } = await db.from("advance_recipients")
+      .insert({ event_id: eventId, lineup_entry_id: req.lineup_entry_id, name: name || "Contact", email: email || null, token, scope: req.lineup_entry_id ? "artist" : "event" })
+      .select().single()
+    if (rec) {
+      await db.from("advance_requests").update({ recipient_id: rec.id }).eq("id", req.id)
+      setRecipients((prev) => [...prev, rec])
+      setRequests((prev) => prev.map((r) => (r.id === req.id ? { ...r, recipient_id: rec.id } : r)))
+    }
+  }
+  async function revoke(req: AdvanceRequest) {
+    setRequests((prev) => prev.map((r) => (r.id === req.id ? { ...r, recipient_id: null } : r)))
+    await db.from("advance_requests").update({ recipient_id: null }).eq("id", req.id)
   }
 
-  function copyLink(token: string) {
-    const url = `${window.location.origin}/advance/${token}`
-    navigator.clipboard?.writeText(url)
-    setCopied(token)
-    setTimeout(() => setCopied((c) => (c === token ? null : c)), 1600)
-  }
-
-  const reqsFor = (recId: string) => requests.filter((r) => r.recipient_id === recId)
-  const eventRecs = recipients.filter((r) => r.scope === "event")
-  const artistRecs = recipients.filter((r) => r.scope === "artist")
+  const recById = (id: string | null) => (id ? recipients.find((r) => r.id === id) ?? null : null)
+  const eventReqs = requests.filter((r) => !r.lineup_entry_id)
+  const artistOrder = artists.length ? artists : Array.from(new Set(requests.filter((r) => r.lineup_entry_id).map((r) => r.lineup_entry_id!))).map((id) => ({ id, name: "Artist" }))
 
   if (loading) return <div style={s.skeleton} />
+
+  const total = requests.length
+  const done = requests.filter((r) => r.status === "approved").length
 
   return (
     <div>
       <div style={s.brain}>
         <div style={s.brainIcon}><Wand2 size={16} strokeWidth={2} /></div>
         <div style={{ flex: 1 }}>
-          <div style={s.brainTitle}>External advancing</div>
+          <div style={s.brainTitle}>Advancing</div>
           <div style={s.brainSub}>
-            Generate a fill-in link for the promoter/venue and one for every artist in the lineup. Share the link or invite by email; they complete their sections and submit for your approval.
+            Fill in the show details here — yours and the hosp manager&apos;s to enter. Send any single section out to an artist, driver or hotel only when you actually need their input.
           </div>
         </div>
-        <button style={s.brainBtn} onClick={generate} disabled={busy} type="button">
+        <button style={s.brainBtn} onClick={setup} disabled={busy} type="button">
           {busy ? <Loader size={15} style={{ animation: "lk-spin 0.8s linear infinite" }} /> : <Wand2 size={15} strokeWidth={2.2} />}
-          {busy ? "Generating…" : recipients.length ? "Generate missing" : "Generate links"}
+          {busy ? "Setting up…" : total ? "Add missing" : "Set up advancing"}
         </button>
       </div>
 
-      {recipients.length === 0 ? (
+      {total === 0 ? (
         <div style={s.empty}>
-          <Users size={20} strokeWidth={1.6} style={{ color: "var(--muted)" }} />
-          <div style={s.emptyTitle}>No advancing links yet</div>
-          <div style={s.emptySub}>
-            {lineupCount === 0
-              ? "Add acts to the Lineup first, then generate — you'll get a link per artist plus one for the promoter/venue."
-              : `Generate to create a promoter/venue link and ${lineupCount} artist ${lineupCount === 1 ? "link" : "links"} in one go.`}
-          </div>
+          <div style={s.emptyTitle}>No advancing set up yet</div>
+          <div style={s.emptySub}>Set up to create the event sections plus a set for each artist in the lineup. You fill them in here.</div>
         </div>
       ) : (
         <>
-          {eventRecs.length > 0 && <div style={s.groupLabel}>Promoter / Venue</div>}
-          {eventRecs.map((rec) => (
-            <RecipientCard key={rec.id} rec={rec} requests={reqsFor(rec.id)} expanded={expanded === rec.id} copied={copied === rec.token}
-              onToggle={() => setExpanded((e) => (e === rec.id ? null : rec.id))} onCopy={() => copyLink(rec.token)} onApprove={approve} onReopen={reopen} />
-          ))}
-          {artistRecs.length > 0 && <div style={s.groupLabel}>Artists · {artistRecs.length}</div>}
-          {artistRecs.map((rec) => (
-            <RecipientCard key={rec.id} rec={rec} requests={reqsFor(rec.id)} expanded={expanded === rec.id} copied={copied === rec.token}
-              onToggle={() => setExpanded((e) => (e === rec.id ? null : rec.id))} onCopy={() => copyLink(rec.token)} onApprove={approve} onReopen={reopen} />
-          ))}
+          <div style={s.progress}>{done}/{total} sections approved</div>
+
+          <Group label="Event" count={eventReqs.length} open={openGroup === "event"} onToggle={() => setOpenGroup((g) => (g === "event" ? null : "event"))}>
+            {eventReqs.map((req) => (
+              <SectionEditor key={req.id} req={req} form={forms[req.id] ?? {}} recipient={recById(req.recipient_id)} origin={typeof window !== "undefined" ? window.location.origin : ""}
+                onField={setField} onBlur={saveReq} onStatus={setStatus} onSendOut={sendOut} onRevoke={revoke} />
+            ))}
+          </Group>
+
+          {artistOrder.map((a) => {
+            const reqs = requests.filter((r) => r.lineup_entry_id === a.id)
+            if (!reqs.length) return null
+            const aDone = reqs.filter((r) => r.status === "approved").length
+            return (
+              <Group key={a.id} label={a.name} count={reqs.length} sub={`${aDone}/${reqs.length}`} open={openGroup === a.id} onToggle={() => setOpenGroup((g) => (g === a.id ? null : a.id))}>
+                {reqs.map((req) => (
+                  <SectionEditor key={req.id} req={req} form={forms[req.id] ?? {}} recipient={recById(req.recipient_id)} origin={typeof window !== "undefined" ? window.location.origin : ""}
+                    onField={setField} onBlur={saveReq} onStatus={setStatus} onSendOut={sendOut} onRevoke={revoke} />
+                ))}
+              </Group>
+            )
+          })}
         </>
       )}
     </div>
   )
 }
 
-function RecipientCard({ rec, requests, expanded, copied, onToggle, onCopy, onApprove, onReopen }: {
-  rec: AdvanceRecipient
-  requests: AdvanceRequest[]
-  expanded: boolean
-  copied: boolean
-  onToggle: () => void
-  onCopy: () => void
-  onApprove: (id: string) => void
-  onReopen: (id: string) => void
+function Group({ label, count, sub, open, onToggle, children }: { label: string; count: number; sub?: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <div style={s.group}>
+      <button style={s.groupHead} onClick={onToggle} type="button">
+        {open ? <ChevronDown size={16} strokeWidth={2} style={{ color: "var(--muted)" }} /> : <ChevronRight size={16} strokeWidth={2} style={{ color: "var(--muted)" }} />}
+        <span style={s.groupName}>{label}</span>
+        <span style={s.groupCount}>{sub ?? count}</span>
+      </button>
+      {open && <div style={s.groupBody}>{children}</div>}
+    </div>
+  )
+}
+
+function SectionEditor({ req, form, recipient, origin, onField, onBlur, onStatus, onSendOut, onRevoke }: {
+  req: AdvanceRequest
+  form: Record<string, unknown>
+  recipient: AdvanceRecipient | null
+  origin: string
+  onField: (reqId: string, key: string, value: unknown) => void
+  onBlur: (reqId: string) => void
+  onStatus: (reqId: string, status: AdvanceStatus) => void
+  onSendOut: (req: AdvanceRequest, name: string, email: string) => void
+  onRevoke: (req: AdvanceRequest) => void
 }) {
-  const submitted = requests.filter((r) => r.status === "submitted").length
-  const approved = requests.filter((r) => r.status === "approved").length
-  const total = requests.length
+  const def = categoryDef(req.category)
+  const [sharing, setSharing] = useState(false)
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [copied, setCopied] = useState(false)
+
+  const link = recipient ? `${origin}/advance/${recipient.token}` : ""
+  function copy() { navigator.clipboard?.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1500) }
 
   return (
-    <div style={s.card}>
-      <div style={s.cardTop}>
-        <button style={s.cardMain} onClick={onToggle} type="button">
-          {expanded ? <ChevronDown size={16} strokeWidth={2} style={{ color: "var(--muted)" }} /> : <ChevronRight size={16} strokeWidth={2} style={{ color: "var(--muted)" }} />}
-          <span style={s.recName}>{rec.name}</span>
-          <span style={s.recMeta}>
-            {approved === total && total > 0 ? <span style={{ color: "var(--green)", fontWeight: 600 }}>All approved</span>
-              : submitted > 0 ? <span style={{ color: "var(--accent)", fontWeight: 600 }}>{submitted} to review</span>
-              : `${approved}/${total} approved`}
-          </span>
-        </button>
-        <div style={s.cardActions}>
-          <a href={`/advance/${rec.token}`} target="_blank" rel="noopener noreferrer" style={s.openBtn} title="Open the external page">
-            <ExternalLink size={13} strokeWidth={2} />
-          </a>
-          <button style={s.copyBtn} onClick={onCopy} type="button">
-            {copied ? <><Check size={13} strokeWidth={2.6} /> Copied</> : <><Link2 size={13} strokeWidth={2} /> Copy link</>}
-          </button>
+    <section style={s.sec}>
+      <div style={s.secHead}>
+        <span style={s.secTitle}>{def?.title ?? req.category}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <StatusPill status={req.status} />
+          {req.status === "approved"
+            ? <button style={s.iconAction} title="Reopen" onClick={() => onStatus(req.id, "open")} type="button"><RotateCcw size={13} strokeWidth={2} /></button>
+            : <button style={s.approveBtn} onClick={() => onStatus(req.id, "approved")} type="button"><CircleCheck size={13} strokeWidth={2.2} /> Approve</button>}
         </div>
       </div>
 
-      {expanded && (
-        <div style={s.reqList}>
-          {requests.map((req) => {
-            const def = categoryDef(req.category)
-            const filled = def?.fields.map((f) => ({ label: f.label, value: req.data?.[f.key] }))
-              .filter((x) => x.value !== undefined && x.value !== "" && x.value !== false) ?? []
-            return (
-              <div key={req.id} style={s.req}>
-                <div style={s.reqHead}>
-                  <span style={s.reqTitle}>{def?.title ?? req.category}</span>
-                  <StatusPill status={req.status} />
-                </div>
-                {filled.length > 0 ? (
-                  <div style={s.reqData}>
-                    {filled.map((x, i) => (
-                      <div key={i} style={s.reqRow}><span style={s.reqKey}>{x.label}</span><span style={s.reqVal}>{String(x.value === true ? "Yes" : x.value)}</span></div>
-                    ))}
-                  </div>
-                ) : <div style={s.reqEmpty}>Not filled in yet.</div>}
-                <div style={s.reqFoot}>
-                  {req.status === "approved"
-                    ? <button style={s.reopenBtn} onClick={() => onReopen(req.id)} type="button">Reopen</button>
-                    : <button style={s.approveBtn} onClick={() => onApprove(req.id)} type="button"><CircleCheck size={13} strokeWidth={2.2} /> Approve</button>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
+      <div style={s.fields}>
+        {(def?.fields ?? []).map((field) => (
+          <Field key={field.key} field={field} value={form[field.key]} onChange={(v) => onField(req.id, field.key, v)} onBlur={() => onBlur(req.id)} />
+        ))}
+      </div>
+
+      <div style={s.secFoot}>
+        {recipient ? (
+          <div style={s.sharedRow}>
+            <span style={s.sharedChip}>Sent to {recipient.name}</span>
+            <button style={s.linkBtn} onClick={copy} type="button">{copied ? <><Check size={12} strokeWidth={2.6} /> Copied</> : <><Link2 size={12} strokeWidth={2} /> Copy link</>}</button>
+            <button style={s.revokeBtn} onClick={() => onRevoke(req)} type="button"><X size={12} strokeWidth={2} /> Revoke</button>
+          </div>
+        ) : sharing ? (
+          <div style={s.shareForm}>
+            <input style={s.shareInput} placeholder="Name (artist, driver, hotel…)" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            <input style={s.shareInput} placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <button style={s.shareGo} onClick={() => { onSendOut(req, name, email); setSharing(false) }} type="button">Create link</button>
+            <button style={s.shareCancel} onClick={() => setSharing(false)} type="button"><X size={14} strokeWidth={2} /></button>
+          </div>
+        ) : (
+          <button style={s.sendBtn} onClick={() => setSharing(true)} type="button"><Send size={12} strokeWidth={2} /> Send to external</button>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function Field({ field, value, onChange, onBlur }: { field: FieldDef; value: unknown; onChange: (v: unknown) => void; onBlur: () => void }) {
+  if (field.type === "bool") {
+    return (
+      <label style={{ ...s.field, flexDirection: "row", alignItems: "center", gap: 9, cursor: "pointer" }}>
+        <input type="checkbox" checked={!!value} onChange={(e) => { onChange(e.target.checked); setTimeout(onBlur, 0) }} style={{ width: 16, height: 16, accentColor: "var(--accent)" }} />
+        <span style={s.fieldLabel}>{field.label}</span>
+      </label>
+    )
+  }
+  const common = {
+    value: (value as string) ?? "",
+    placeholder: field.placeholder,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(e.target.value),
+    onBlur,
+    style: s.input,
+  }
+  return (
+    <label style={s.field}>
+      <span style={s.fieldLabel}>{field.label}</span>
+      {field.type === "textarea"
+        ? <textarea rows={2} {...common} style={{ ...s.input, resize: "vertical", minHeight: 52, lineHeight: 1.5 }} />
+        : <input type={inputType(field.type)} {...common} />}
+    </label>
   )
 }
 
@@ -240,34 +277,38 @@ function StatusPill({ status }: { status: AdvanceStatus }) {
 
 const s: Record<string, React.CSSProperties> = {
   skeleton: { height: 400, background: "var(--inset)", borderRadius: "var(--radius)" },
-  brain: { display: "flex", alignItems: "center", gap: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "14px 16px", marginBottom: 16, boxShadow: "var(--shadow-sm)" },
+  brain: { display: "flex", alignItems: "center", gap: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "14px 16px", marginBottom: 14, boxShadow: "var(--shadow-sm)" },
   brainIcon: { width: 34, height: 34, borderRadius: 9, flexShrink: 0, background: "var(--accent-tint)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" },
   brainTitle: { fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 2 },
   brainSub: { fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 },
   brainBtn: { display: "flex", alignItems: "center", gap: 7, background: "var(--accent)", color: "#fff", border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" },
-  empty: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textAlign: "center", padding: "44px 24px", background: "var(--card)", border: "1px dashed var(--border-strong)", borderRadius: "var(--radius)", color: "var(--text-2)" },
+  empty: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, textAlign: "center", padding: "44px 24px", background: "var(--card)", border: "1px dashed var(--border-strong)", borderRadius: "var(--radius)", color: "var(--text-2)" },
   emptyTitle: { fontFamily: "var(--font-fraunces), serif", fontSize: 16, fontWeight: 600, color: "var(--text)" },
-  emptySub: { fontSize: 13, color: "var(--text-2)", maxWidth: 360, lineHeight: 1.5 },
-  groupLabel: { fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: "18px 0 9px 2px" },
-  card: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 13, marginBottom: 9, boxShadow: "var(--shadow-sm)", overflow: "hidden" },
-  cardTop: { display: "flex", alignItems: "center", gap: 8, padding: "11px 13px" },
-  cardMain: { display: "flex", alignItems: "center", gap: 9, flex: 1, background: "transparent", border: "none", cursor: "pointer", padding: 0, minWidth: 0, textAlign: "left" },
-  recName: { fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  recMeta: { fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" },
-  cardActions: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 },
-  openBtn: { width: 30, height: 30, borderRadius: 8, background: "var(--inset)", border: "1px solid var(--border)", color: "var(--text-2)", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" },
-  copyBtn: { display: "flex", alignItems: "center", gap: 5, background: "var(--inset)", border: "1px solid var(--border)", color: "var(--text-2)", borderRadius: 8, padding: "7px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
-  reqList: { borderTop: "1px solid var(--border)", padding: "6px 13px 13px", display: "flex", flexDirection: "column", gap: 8 },
-  req: { background: "var(--bg-2)", borderRadius: 10, padding: "11px 12px", marginTop: 7 },
-  reqHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  reqTitle: { fontSize: 13, fontWeight: 600, color: "var(--text)" },
-  reqData: { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 },
-  reqRow: { display: "flex", gap: 10, fontSize: 12.5 },
-  reqKey: { color: "var(--muted)", minWidth: 120, flexShrink: 0 },
-  reqVal: { color: "var(--text)", fontWeight: 500, wordBreak: "break-word" },
-  reqEmpty: { fontSize: 12, color: "var(--muted)", marginTop: 7, fontStyle: "italic" },
-  reqFoot: { display: "flex", justifyContent: "flex-end", marginTop: 10 },
-  approveBtn: { display: "flex", alignItems: "center", gap: 5, background: "var(--green-tint)", color: "var(--green)", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" },
-  reopenBtn: { background: "var(--inset)", color: "var(--text-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 500, cursor: "pointer" },
+  emptySub: { fontSize: 13, color: "var(--text-2)", maxWidth: 380, lineHeight: 1.5 },
+  progress: { fontSize: 12, color: "var(--muted)", fontWeight: 500, margin: "2px 2px 12px" },
+  group: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 13, marginBottom: 10, boxShadow: "var(--shadow-sm)", overflow: "hidden" },
+  groupHead: { display: "flex", alignItems: "center", gap: 9, width: "100%", background: "transparent", border: "none", cursor: "pointer", padding: "12px 14px", textAlign: "left" },
+  groupName: { flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  groupCount: { fontSize: 11.5, fontWeight: 600, color: "var(--muted)", background: "var(--bg-2)", borderRadius: 999, padding: "2px 9px" },
+  groupBody: { borderTop: "1px solid var(--border)", padding: "8px 14px 14px", display: "flex", flexDirection: "column", gap: 10 },
+  sec: { background: "var(--bg-2)", borderRadius: 11, padding: "12px 13px", marginTop: 8 },
+  secHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 },
+  secTitle: { fontSize: 13.5, fontWeight: 600, color: "var(--text)" },
+  fields: { display: "flex", flexDirection: "column", gap: 10, marginTop: 8 },
+  field: { display: "flex", flexDirection: "column", gap: 5 },
+  fieldLabel: { fontSize: 12, fontWeight: 600, color: "var(--text-2)" },
+  input: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 13.5, padding: "9px 11px", outline: "none", fontFamily: "inherit", width: "100%" },
+  secFoot: { marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" },
+  sendBtn: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "var(--accent)", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 },
+  shareForm: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  shareInput: { flex: "1 1 120px", minWidth: 100, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 12.5, padding: "7px 9px", outline: "none" },
+  shareGo: { background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
+  shareCancel: { width: 30, height: 30, borderRadius: 8, background: "var(--inset)", border: "1px solid var(--border)", color: "var(--text-2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  sharedRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  sharedChip: { fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "var(--accent-tint)", borderRadius: 7, padding: "4px 9px" },
+  linkBtn: { display: "flex", alignItems: "center", gap: 5, background: "var(--inset)", border: "1px solid var(--border)", color: "var(--text-2)", borderRadius: 7, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" },
+  revokeBtn: { display: "flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: "var(--muted)", fontSize: 11.5, fontWeight: 500, cursor: "pointer" },
+  approveBtn: { display: "flex", alignItems: "center", gap: 5, background: "var(--green-tint)", color: "var(--green)", border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" },
+  iconAction: { width: 26, height: 26, borderRadius: 7, background: "var(--inset)", border: "1px solid var(--border)", color: "var(--text-2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
   pill: { fontSize: 10.5, fontWeight: 600, borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" },
 }
