@@ -141,13 +141,13 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
             {/* Leadership row — always at top */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
               <div style={{
-                display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center",
+                display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", alignItems: "flex-start",
                 background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14,
                 padding: "12px 14px 10px",
               }}>
                 <div style={s.deptTag}>Leadership</div>
                 {leaderMembers.map((m) => (
-                  <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} />
+                  <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill={false} />
                 ))}
                 {isAdmin && (
                   <button style={s.addRoleBtn}
@@ -183,7 +183,7 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
                     <div style={{ width: 2, height: 20, background: "var(--border)" }} />
                     <div style={s.deptTag}>{dept}</div>
                     {byDept[dept]?.map((m) => (
-                      <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} />
+                      <OrgNode key={m.id} m={m} isAdmin={isAdmin} onEdit={() => setModal(m)} fill />
                     ))}
                     {isAdmin && (
                       <button style={s.addRoleBtn}
@@ -258,13 +258,14 @@ export default function TeamTab({ currentUserId, isAdmin }: { currentUserId: str
   )
 }
 
-function OrgNode({ m, isAdmin, onEdit }: { m: TeamMember; isAdmin: boolean; onEdit: () => void }) {
+function OrgNode({ m, isAdmin, onEdit, fill }: { m: TeamMember; isAdmin: boolean; onEdit: () => void; fill?: boolean }) {
   const positions = m.positions || []
   return (
     <div style={{
       background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 11,
       padding: "10px 10px 9px", display: "flex", flexDirection: "column", alignItems: "center",
-      gap: 5, width: "100%", position: "relative", boxShadow: "var(--shadow-sm)",
+      gap: 5, width: fill ? "100%" : "auto", minWidth: 120, maxWidth: 200,
+      position: "relative", boxShadow: "var(--shadow-sm)",
     }}>
       {isAdmin && (
         <button style={{
