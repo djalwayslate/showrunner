@@ -34,9 +34,13 @@ Return ONLY valid JSON, nothing else:
     }]
   })
 
-  const raw = (msg.content[0] as { type: string; text: string }).text.trim()
+  let raw = (msg.content[0] as { type: string; text: string }).text.trim()
+  // strip markdown code fences if present
+  raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
+  // fallback: extract first {...} block
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
   try {
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw)
     return NextResponse.json(parsed)
   } catch {
     return NextResponse.json({ positions: [], department: "General", reason: "Could not parse suggestion." })
